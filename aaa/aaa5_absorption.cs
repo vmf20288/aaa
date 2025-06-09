@@ -8,8 +8,8 @@ using NinjaTrader.Data;
 using NinjaTrader.Gui.Chart;
 using NinjaTrader.NinjaScript;
 using NinjaTrader.NinjaScript.Indicators;
+using NinjaTrader.NinjaScript.DrawingTools;
 using SharpDX;
-using SharpDX.Direct2D1;
 #endregion
 
 // aaa5_absorption.cs - Absorption indicator for NinjaTrader 8.1.5
@@ -119,7 +119,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         [NinjaScriptProperty]
         [Display(Name = "Fail Marker Color", Order = 22, GroupName = "Failure")]
-        public Brush FailMarkerColor { get; set; } = Brushes.Gold;
+        public System.Windows.Media.Brush FailMarkerColor { get; set; } = Brushes.Gold;
 
         private float rectHeight = 20f;
         private float bottomMargin = 40f;
@@ -157,8 +157,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 vwap  = aaa1_vwap(ShowWeeklyVWAP, true, true, ShowVWAP, true, true, UseAnchoredVWAP, DateTime.Today, "00:00");
                 zones = aaa4_zones(0.21, 0.32, 0.13, 2, "1", 300, false);
                 atr   = ATR(AtrPeriod);
-                brushText    = new SolidColorBrush(RenderTarget, new Color(0f, 0f, 0f, 1f));
-                brushFillGray = new SolidColorBrush(RenderTarget, new Color(0.7f,0.7f,0.7f,0.8f));
+                brushText    = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new SharpDX.Color(0f, 0f, 0f, 1f));
+                brushFillGray = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new SharpDX.Color(0.7f,0.7f,0.7f,0.8f));
             }
             else if (State == State.Terminated)
             {
@@ -256,7 +256,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 flagAbs[b] = absorb;
                 if (absorb)
                 {
-                    Brush col = isSupply ? Brushes.Red : Brushes.Lime;
+                    System.Windows.Media.Brush col = isSupply ? Brushes.Red : Brushes.Lime;
                     Draw.Diamond(this, "ABS" + b, false, 1, isSupply ? High[b] : Low[b], col);
                     if (EnableFailMarker)
                     {
@@ -451,9 +451,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             float intensity = (float)(Math.Abs(val) / maxAbs);
             intensity = Math.Max(0.2f, Math.Min(1f, intensity));
 
-            Color fillColor = val >= 0 ? new Color(0f, intensity, 0f, intensity)
-                                      : new Color(intensity, 0f, 0f, intensity);
-            using (var fill = new SolidColorBrush(RenderTarget, fillColor))
+            SharpDX.Color fillColor = val >= 0 ? new SharpDX.Color(0f, intensity, 0f, intensity)
+                                              : new SharpDX.Color(intensity, 0f, 0f, intensity);
+            using (var fill = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, fillColor))
                 RenderTarget.FillRectangle(new RectangleF(xLeft, yTop, width, height), fill);
             RenderTarget.DrawRectangle(new RectangleF(xLeft, yTop, width, height), brushText, 1f);
 
