@@ -52,9 +52,16 @@ namespace NinjaTrader.NinjaScript.Indicators
                 return;
 
             string tagBase = "BP" + CurrentBar + "_" + CurrentBar + "_" + Bars.TickCount;
-            Brush brush = e.Price >= Close[0] ? buyBrush : sellBrush;
+            Brush brush = null;
 
-            Draw.Dot(this, tagBase, false, 0, e.Price, brush);
+            if (e.Price == GetCurrentBid())
+                brush = buyBrush;
+            else if (e.Price == GetCurrentAsk())
+                brush = sellBrush;
+
+            if (brush == null)
+                return;
+
             Draw.Text(this, tagBase + "T", false, e.Volume.ToString(), 0, e.Price, 0, brush, new SimpleFont("Arial", 12), TextAlignment.Center, Brushes.Transparent, Brushes.Transparent, 0);
         }
     }
