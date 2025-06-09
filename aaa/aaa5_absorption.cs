@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
+using System.Windows;
 using System.Windows.Media;
 using NinjaTrader.Data;
 using NinjaTrader.Gui.Chart;
@@ -11,6 +12,10 @@ using NinjaTrader.NinjaScript;
 using NinjaTrader.NinjaScript.Indicators;
 using NinjaTrader.NinjaScript.DrawingTools;
 using SharpDX;
+using NinjaTrader.NinjaScript;
+using NinjaTrader.NinjaScript.Indicators;
+using SharpDX;
+using SharpDX.Direct2D1;
 #endregion
 
 // aaa5_absorption.cs - Absorption indicator for NinjaTrader 8.1.5
@@ -121,6 +126,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         [NinjaScriptProperty]
         [Display(Name = "Fail Marker Color", Order = 22, GroupName = "Failure")]
         public System.Windows.Media.Brush FailMarkerColor { get; set; } = Brushes.Gold;
+        public Brush FailMarkerColor { get; set; } = Brushes.Gold;
 
         private float rectHeight = 20f;
         private float bottomMargin = 40f;
@@ -160,6 +166,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 atr   = ATR(AtrPeriod);
                 brushText    = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new SharpDX.Color(0f, 0f, 0f, 1f));
                 brushFillGray = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new SharpDX.Color(0.7f,0.7f,0.7f,0.8f));
+                brushText    = new SolidColorBrush(RenderTarget, new Color(0f, 0f, 0f, 1f));
+                brushFillGray = new SolidColorBrush(RenderTarget, new Color(0.7f,0.7f,0.7f,0.8f));
             }
             else if (State == State.Terminated)
             {
@@ -258,6 +266,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 if (absorb)
                 {
                     System.Windows.Media.Brush col = isSupply ? Brushes.Red : Brushes.Lime;
+
+                    Brush col = isSupply ? Brushes.Red : Brushes.Lime;
                     Draw.Diamond(this, "ABS" + b, false, 1, isSupply ? High[b] : Low[b], col);
                     if (EnableFailMarker)
                     {
@@ -287,11 +297,13 @@ namespace NinjaTrader.NinjaScript.Indicators
                 if (f.IsSupply && closePrev > f.Upper)
                 {
                     Draw.Text(this, "FAIL" + f.BarIdx + "_" + f.Remaining, false, "R", 0, closePrev, 0, FailMarkerColor, new SimpleFont("Arial", 12), TextAlignment.Center, Brushes.Transparent, Brushes.Transparent, 0);
+                    Draw.Text(this, "FAIL" + f.BarIdx + "_" + f.Remaining, false, "R", 0, closePrev, FailMarkerColor);
                     failTracks.RemoveAt(i);
                 }
                 else if (!f.IsSupply && closePrev < f.Lower)
                 {
                     Draw.Text(this, "FAIL" + f.BarIdx + "_" + f.Remaining, false, "R", 0, closePrev, 0, FailMarkerColor, new SimpleFont("Arial", 12), TextAlignment.Center, Brushes.Transparent, Brushes.Transparent, 0);
+                    Draw.Text(this, "FAIL" + f.BarIdx + "_" + f.Remaining, false, "R", 0, closePrev, FailMarkerColor);
                     failTracks.RemoveAt(i);
                 }
                 else
@@ -455,6 +467,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             SharpDX.Color fillColor = val >= 0 ? new SharpDX.Color(0f, intensity, 0f, intensity)
                                               : new SharpDX.Color(intensity, 0f, 0f, intensity);
             using (var fill = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, fillColor))
+            Color fillColor = val >= 0 ? new Color(0f, intensity, 0f, intensity)
+                                      : new Color(intensity, 0f, 0f, intensity);
+            using (var fill = new SolidColorBrush(RenderTarget, fillColor))
                 RenderTarget.FillRectangle(new RectangleF(xLeft, yTop, width, height), fill);
             RenderTarget.DrawRectangle(new RectangleF(xLeft, yTop, width, height), brushText, 1f);
 
