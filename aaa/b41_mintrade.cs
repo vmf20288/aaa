@@ -12,11 +12,11 @@ using SharpDX;
 using SharpDX.Direct2D1;
 #endregion
 
-// b3.cs - Footprint/absorption indicator for NinjaTrader 8.1.5.1
+// b41_mintrade.cs - Footprint/absorption indicator with minimum trade filter for NinjaTrader 8.1.5.1
 
 namespace NinjaTrader.NinjaScript.Indicators
 {
-    public class b3 : Indicator
+    public class b41_mintrade : Indicator
     {
         private class LevelStats
         {
@@ -47,6 +47,10 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "Delta por nivel precio", Order = 0, GroupName = "Parameters")]
         public bool DeltaPorNivelPrecio { get; set; } = false;
 
+        [NinjaScriptProperty]
+        [Display(Name = "Min Trade", Order = 1, GroupName = "Parameters")]
+        public int MinTrade { get; set; } = 15;
+
         private bool lastDeltaPorNivelPrecio;
 
         private SolidColorBrush brushAsk;
@@ -60,7 +64,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             if (State == State.SetDefaults)
             {
-                Name                    = "b3";
+                Name                    = "b41_mintrade";
                 Description             = "Footprint/absorption indicator";
                 Calculate               = Calculate.OnEachTick;
                 IsOverlay               = true;
@@ -132,6 +136,10 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             double price       = e.Price;
             double vol         = e.Volume;
+
+            if (vol < MinTrade)
+                return;
+
             double priceRounded = Instrument.MasterInstrument.RoundToTickSize(price);
 
             int sign;
@@ -336,19 +344,19 @@ namespace NinjaTrader.NinjaScript.Indicators
 {
     public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
     {
-        private b3[] cacheb3;
-        public b3 b3(bool deltaPorNivelPrecio)
+        private b41_mintrade[] cacheb41_mintrade;
+        public b41_mintrade b41_mintrade(bool deltaPorNivelPrecio, int minTrade)
         {
-            return b3(Input, deltaPorNivelPrecio);
+            return b41_mintrade(Input, deltaPorNivelPrecio, minTrade);
         }
 
-        public b3 b3(ISeries<double> input, bool deltaPorNivelPrecio)
+        public b41_mintrade b41_mintrade(ISeries<double> input, bool deltaPorNivelPrecio, int minTrade)
         {
-            if (cacheb3 != null)
-                for (int idx = 0; idx < cacheb3.Length; idx++)
-                    if (cacheb3[idx] != null && cacheb3[idx].DeltaPorNivelPrecio == deltaPorNivelPrecio && cacheb3[idx].EqualsInput(input))
-                        return cacheb3[idx];
-            return CacheIndicator<b3>(new b3(){ DeltaPorNivelPrecio = deltaPorNivelPrecio }, input, ref cacheb3);
+            if (cacheb41_mintrade != null)
+                for (int idx = 0; idx < cacheb41_mintrade.Length; idx++)
+                    if (cacheb41_mintrade[idx] != null && cacheb41_mintrade[idx].DeltaPorNivelPrecio == deltaPorNivelPrecio && cacheb41_mintrade[idx].MinTrade == minTrade && cacheb41_mintrade[idx].EqualsInput(input))
+                        return cacheb41_mintrade[idx];
+            return CacheIndicator<b41_mintrade>(new b41_mintrade(){ DeltaPorNivelPrecio = deltaPorNivelPrecio, MinTrade = minTrade }, input, ref cacheb41_mintrade);
         }
     }
 }
