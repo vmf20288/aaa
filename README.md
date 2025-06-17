@@ -9,3 +9,5 @@ Custom NinjaTrader indicators updated for version 8.1.5.
 * `aaa5_absorption` – absorption detection indicator
 
 * `b2` – zone/vwap touch and limit order alerts
+* `b3` – footprint/absorption indicator
+* `b4_bigorder` – marks large orders on the chart
