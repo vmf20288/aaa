@@ -17,6 +17,8 @@ using SharpDX.DirectWrite;
 // ──────────────────────────────────────────────────────────────
 namespace NinjaTrader.NinjaScript.Indicators
 {
+    public enum BreakMode { Immediate = 1, Reentry = 2 }
+
     public class aaa4_zones : Indicator
     {
         // ───────────────  USER PARAMETERS  ───────────────
@@ -64,6 +66,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         private SolidColorBrush brushFill;
         private SolidColorBrush brushOutline;
         private StrokeStyle strokeStyleDotted;
+        private SharpDX.DirectWrite.Factory textFactory;
         private Factory textFactory;
         private TextFormat textFormat;
         private Dictionary<int, TextLayout> tfLayouts;
@@ -104,6 +107,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
             else if (State == State.DataLoaded)
             {
+                textFactory = new SharpDX.DirectWrite.Factory();
                 textFactory = new Factory();
                 textFormat  = new TextFormat(textFactory, "Arial", 12f);
                 tfLayouts   = new Dictionary<int, TextLayout>();
@@ -348,7 +352,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (strokeStyleDotted == null)
             {
                 var props = new StrokeStyleProperties { DashStyle = DashStyle.Custom };
-                strokeStyleDotted = new StrokeStyle(RenderTarget.Factory, props, new[] { 2f, 2f });
+                strokeStyleDotted = new StrokeStyle((SharpDX.Direct2D1.Factory)RenderTarget.Factory, props, new[] { 2f, 2f });
             }
         }
 
@@ -375,6 +379,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 zones.Clear();
                 llLines.Clear();
             }
+            ChartControl?.InvalidateVisual();
             ChartControl?.InvalidateVisual(true);
         }
 
@@ -458,11 +463,13 @@ namespace NinjaTrader.NinjaScript.Indicators
     public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
     {
         private aaa4_zones[] cacheaaa4_zones;
+        public aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
         public aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, aaa4_zones.BreakMode rotaOption, int ticksMaxZona)
         {
             return aaa4_zones(Input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona);
         }
 
+        public aaa4_zones aaa4_zones(ISeries<double> input, double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
         public aaa4_zones aaa4_zones(ISeries<double> input, double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, aaa4_zones.BreakMode rotaOption, int ticksMaxZona)
         {
             if (cacheaaa4_zones != null)
@@ -478,11 +485,13 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
     public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
     {
+        public Indicators.aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
         public Indicators.aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, aaa4_zones.BreakMode rotaOption, int ticksMaxZona)
         {
             return indicator.aaa4_zones(Input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona);
         }
 
+        public Indicators.aaa4_zones aaa4_zones(ISeries<double> input , double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
         public Indicators.aaa4_zones aaa4_zones(ISeries<double> input , double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, aaa4_zones.BreakMode rotaOption, int ticksMaxZona)
         {
             return indicator.aaa4_zones(input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona);
@@ -494,11 +503,13 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
     public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
     {
+        public Indicators.aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
         public Indicators.aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, aaa4_zones.BreakMode rotaOption, int ticksMaxZona)
         {
             return indicator.aaa4_zones(Input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona);
         }
 
+        public Indicators.aaa4_zones aaa4_zones(ISeries<double> input , double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
         public Indicators.aaa4_zones aaa4_zones(ISeries<double> input , double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, aaa4_zones.BreakMode rotaOption, int ticksMaxZona)
         {
             return indicator.aaa4_zones(input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona);
