@@ -44,6 +44,14 @@ namespace NinjaTrader.NinjaScript.Indicators
         public bool ShowAnchored { get; set; } = false;
 
         [NinjaScriptProperty]
+        [Display(Name = "Show Anchored Bands 1 (±1σ)", Order = 3, GroupName = "Anchored VWAP")]
+        public bool ShowAnchoredBands1 { get; set; } = false;
+
+        [NinjaScriptProperty]
+        [Display(Name = "Show Anchored Bands 2 (±2σ)", Order = 4, GroupName = "Anchored VWAP")]
+        public bool ShowAnchoredBands2 { get; set; } = false;
+
+        [NinjaScriptProperty]
         [Display(Name = "Anchor Date", Order = 1, GroupName = "Anchored VWAP")]
         public DateTime AnchorDate { get; set; } = DateTime.Today;
 
@@ -55,6 +63,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         private double wSumPV, wSumV, wSumVarPV;
         private double sSumPV, sSumV, sSumVarPV;
         private double aSumPV, aSumV;
+        private double aSumP2V;
         private bool anchorActive;
         private double prevVol;
 
@@ -81,6 +90,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                 AddPlot(Brushes.Purple, "Session -1σ");    // 8
                 AddPlot(Brushes.Purple, "Session +2σ");    // 9
                 AddPlot(Brushes.Purple, "Session -2σ");    //10
+                AddPlot(Brushes.Orange, "Anch +1σ");   // 11
+                AddPlot(Brushes.Orange, "Anch -1σ");   // 12
+                AddPlot(Brushes.Orange, "Anch +2σ");   // 13
+                AddPlot(Brushes.Orange, "Anch -2σ");   // 14
             }
         }
 
@@ -124,16 +137,18 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 if (!anchorActive && Time[0] >= anchorDT)
                 {
-                    aSumPV = aSumV = 0;
+                    aSumPV = aSumV = aSumP2V = 0;
                     anchorActive = true;
                 }
                 if (anchorActive)
                 {
                     aSumPV += price * deltaVol;
                     aSumV += deltaVol;
+                    aSumP2V += price * price * deltaVol;
                 }
             }
-            double aVWAP = aSumV == 0 ? price : aSumPV / aSumV;
+            double aVWAP  = aSumV == 0 ? price : aSumPV / aSumV;
+            double aSigma = aSumV == 0 ? 0     : Math.Sqrt((aSumP2V / aSumV) - aVWAP * aVWAP);
 
             if (ShowWeekly)
             {
@@ -174,7 +189,20 @@ namespace NinjaTrader.NinjaScript.Indicators
                     Values[i][0] = double.NaN;
             }
 
-            Values[6][0] = (ShowAnchored && anchorActive) ? aVWAP : double.NaN;
+            if (ShowAnchored && anchorActive)
+            {
+                Values[6][0]  = aVWAP;
+
+                Values[11][0] = ShowAnchoredBands1 ? aVWAP + aSigma     : double.NaN;
+                Values[12][0] = ShowAnchoredBands1 ? aVWAP - aSigma     : double.NaN;
+                Values[13][0] = ShowAnchoredBands2 ? aVWAP + 2 * aSigma : double.NaN;
+                Values[14][0] = ShowAnchoredBands2 ? aVWAP - 2 * aSigma : double.NaN;
+            }
+            else
+            {
+                Values[6][0]  = double.NaN;
+                Values[11][0] = Values[12][0] = Values[13][0] = Values[14][0] = double.NaN;
+            }
         }
     }
 }
@@ -186,18 +214,18 @@ namespace NinjaTrader.NinjaScript.Indicators
     public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
     {
         private aaa1_vwap[] cacheaaa1_vwap;
-        public aaa1_vwap aaa1_vwap(bool showWeekly, bool showWeeklyBands1, bool showWeeklyBands2, bool showSession, bool showSessionBands1, bool showSessionBands2, bool showAnchored, DateTime anchorDate, string anchorTime)
+        public aaa1_vwap aaa1_vwap(bool showWeekly, bool showWeeklyBands1, bool showWeeklyBands2, bool showSession, bool showSessionBands1, bool showSessionBands2, bool showAnchored, DateTime anchorDate, string anchorTime, bool showAnchoredBands1, bool showAnchoredBands2)
         {
-            return aaa1_vwap(Input, showWeekly, showWeeklyBands1, showWeeklyBands2, showSession, showSessionBands1, showSessionBands2, showAnchored, anchorDate, anchorTime);
+            return aaa1_vwap(Input, showWeekly, showWeeklyBands1, showWeeklyBands2, showSession, showSessionBands1, showSessionBands2, showAnchored, anchorDate, anchorTime, showAnchoredBands1, showAnchoredBands2);
         }
 
-        public aaa1_vwap aaa1_vwap(ISeries<double> input, bool showWeekly, bool showWeeklyBands1, bool showWeeklyBands2, bool showSession, bool showSessionBands1, bool showSessionBands2, bool showAnchored, DateTime anchorDate, string anchorTime)
+        public aaa1_vwap aaa1_vwap(ISeries<double> input, bool showWeekly, bool showWeeklyBands1, bool showWeeklyBands2, bool showSession, bool showSessionBands1, bool showSessionBands2, bool showAnchored, DateTime anchorDate, string anchorTime, bool showAnchoredBands1, bool showAnchoredBands2)
         {
             if (cacheaaa1_vwap != null)
                 for (int idx = 0; idx < cacheaaa1_vwap.Length; idx++)
-                    if (cacheaaa1_vwap[idx] != null && cacheaaa1_vwap[idx].ShowWeekly == showWeekly && cacheaaa1_vwap[idx].ShowWeeklyBands1 == showWeeklyBands1 && cacheaaa1_vwap[idx].ShowWeeklyBands2 == showWeeklyBands2 && cacheaaa1_vwap[idx].ShowSession == showSession && cacheaaa1_vwap[idx].ShowSessionBands1 == showSessionBands1 && cacheaaa1_vwap[idx].ShowSessionBands2 == showSessionBands2 && cacheaaa1_vwap[idx].ShowAnchored == showAnchored && cacheaaa1_vwap[idx].AnchorDate == anchorDate && cacheaaa1_vwap[idx].AnchorTime == anchorTime && cacheaaa1_vwap[idx].EqualsInput(input))
+                    if (cacheaaa1_vwap[idx] != null && cacheaaa1_vwap[idx].ShowWeekly == showWeekly && cacheaaa1_vwap[idx].ShowWeeklyBands1 == showWeeklyBands1 && cacheaaa1_vwap[idx].ShowWeeklyBands2 == showWeeklyBands2 && cacheaaa1_vwap[idx].ShowSession == showSession && cacheaaa1_vwap[idx].ShowSessionBands1 == showSessionBands1 && cacheaaa1_vwap[idx].ShowSessionBands2 == showSessionBands2 && cacheaaa1_vwap[idx].ShowAnchored == showAnchored && cacheaaa1_vwap[idx].AnchorDate == anchorDate && cacheaaa1_vwap[idx].AnchorTime == anchorTime && cacheaaa1_vwap[idx].ShowAnchoredBands1 == showAnchoredBands1 && cacheaaa1_vwap[idx].ShowAnchoredBands2 == showAnchoredBands2 && cacheaaa1_vwap[idx].EqualsInput(input))
                         return cacheaaa1_vwap[idx];
-            return CacheIndicator<aaa1_vwap>(new aaa1_vwap() { ShowWeekly = showWeekly, ShowWeeklyBands1 = showWeeklyBands1, ShowWeeklyBands2 = showWeeklyBands2, ShowSession = showSession, ShowSessionBands1 = showSessionBands1, ShowSessionBands2 = showSessionBands2, ShowAnchored = showAnchored, AnchorDate = anchorDate, AnchorTime = anchorTime }, input, ref cacheaaa1_vwap);
+            return CacheIndicator<aaa1_vwap>(new aaa1_vwap() { ShowWeekly = showWeekly, ShowWeeklyBands1 = showWeeklyBands1, ShowWeeklyBands2 = showWeeklyBands2, ShowSession = showSession, ShowSessionBands1 = showSessionBands1, ShowSessionBands2 = showSessionBands2, ShowAnchored = showAnchored, AnchorDate = anchorDate, AnchorTime = anchorTime, ShowAnchoredBands1 = showAnchoredBands1, ShowAnchoredBands2 = showAnchoredBands2 }, input, ref cacheaaa1_vwap);
         }
     }
 }
@@ -206,14 +234,14 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
     public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
     {
-        public Indicators.aaa1_vwap aaa1_vwap(bool showWeekly, bool showWeeklyBands1, bool showWeeklyBands2, bool showSession, bool showSessionBands1, bool showSessionBands2, bool showAnchored, DateTime anchorDate, string anchorTime)
+        public Indicators.aaa1_vwap aaa1_vwap(bool showWeekly, bool showWeeklyBands1, bool showWeeklyBands2, bool showSession, bool showSessionBands1, bool showSessionBands2, bool showAnchored, DateTime anchorDate, string anchorTime, bool showAnchoredBands1, bool showAnchoredBands2)
         {
-            return indicator.aaa1_vwap(Input, showWeekly, showWeeklyBands1, showWeeklyBands2, showSession, showSessionBands1, showSessionBands2, showAnchored, anchorDate, anchorTime);
+            return indicator.aaa1_vwap(Input, showWeekly, showWeeklyBands1, showWeeklyBands2, showSession, showSessionBands1, showSessionBands2, showAnchored, anchorDate, anchorTime, showAnchoredBands1, showAnchoredBands2);
         }
 
-        public Indicators.aaa1_vwap aaa1_vwap(ISeries<double> input, bool showWeekly, bool showWeeklyBands1, bool showWeeklyBands2, bool showSession, bool showSessionBands1, bool showSessionBands2, bool showAnchored, DateTime anchorDate, string anchorTime)
+        public Indicators.aaa1_vwap aaa1_vwap(ISeries<double> input, bool showWeekly, bool showWeeklyBands1, bool showWeeklyBands2, bool showSession, bool showSessionBands1, bool showSessionBands2, bool showAnchored, DateTime anchorDate, string anchorTime, bool showAnchoredBands1, bool showAnchoredBands2)
         {
-            return indicator.aaa1_vwap(input, showWeekly, showWeeklyBands1, showWeeklyBands2, showSession, showSessionBands1, showSessionBands2, showAnchored, anchorDate, anchorTime);
+            return indicator.aaa1_vwap(input, showWeekly, showWeeklyBands1, showWeeklyBands2, showSession, showSessionBands1, showSessionBands2, showAnchored, anchorDate, anchorTime, showAnchoredBands1, showAnchoredBands2);
         }
     }
 }
@@ -222,14 +250,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
     public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
     {
-        public Indicators.aaa1_vwap aaa1_vwap(bool showWeekly, bool showWeeklyBands1, bool showWeeklyBands2, bool showSession, bool showSessionBands1, bool showSessionBands2, bool showAnchored, DateTime anchorDate, string anchorTime)
+        public Indicators.aaa1_vwap aaa1_vwap(bool showWeekly, bool showWeeklyBands1, bool showWeeklyBands2, bool showSession, bool showSessionBands1, bool showSessionBands2, bool showAnchored, DateTime anchorDate, string anchorTime, bool showAnchoredBands1, bool showAnchoredBands2)
         {
-            return indicator.aaa1_vwap(Input, showWeekly, showWeeklyBands1, showWeeklyBands2, showSession, showSessionBands1, showSessionBands2, showAnchored, anchorDate, anchorTime);
+            return indicator.aaa1_vwap(Input, showWeekly, showWeeklyBands1, showWeeklyBands2, showSession, showSessionBands1, showSessionBands2, showAnchored, anchorDate, anchorTime, showAnchoredBands1, showAnchoredBands2);
         }
 
-        public Indicators.aaa1_vwap aaa1_vwap(ISeries<double> input, bool showWeekly, bool showWeeklyBands1, bool showWeeklyBands2, bool showSession, bool showSessionBands1, bool showSessionBands2, bool showAnchored, DateTime anchorDate, string anchorTime)
+        public Indicators.aaa1_vwap aaa1_vwap(ISeries<double> input, bool showWeekly, bool showWeeklyBands1, bool showWeeklyBands2, bool showSession, bool showSessionBands1, bool showSessionBands2, bool showAnchored, DateTime anchorDate, string anchorTime, bool showAnchoredBands1, bool showAnchoredBands2)
         {
-            return indicator.aaa1_vwap(input, showWeekly, showWeeklyBands1, showWeeklyBands2, showSession, showSessionBands1, showSessionBands2, showAnchored, anchorDate, anchorTime);
+            return indicator.aaa1_vwap(input, showWeekly, showWeeklyBands1, showWeeklyBands2, showSession, showSessionBands1, showSessionBands2, showAnchored, anchorDate, anchorTime, showAnchoredBands1, showAnchoredBands2);
         }
     }
 }
