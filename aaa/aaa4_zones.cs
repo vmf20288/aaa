@@ -46,6 +46,8 @@ namespace NinjaTrader.NinjaScript.Indicators
         [NinjaScriptProperty]
         public int BreakCandlesNeeded { get; set; }
 
+        public enum BreakMode { Immediate = 1, Reentry = 2 }
+
         [Display(Name = "Break mode", Order = 5, GroupName = "Parameters")]
         [NinjaScriptProperty]
         [Browsable(false)]
@@ -65,6 +67,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         private SolidColorBrush brushOutline;
         private StrokeStyle strokeStyleDotted;
         private SharpDX.DirectWrite.Factory textFactory;
+        private Factory textFactory;
         private TextFormat textFormat;
         private Dictionary<int, TextLayout> tfLayouts;
         private readonly object _sync = new object();
@@ -105,6 +108,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             else if (State == State.DataLoaded)
             {
                 textFactory = new SharpDX.DirectWrite.Factory();
+                textFactory = new Factory();
                 textFormat  = new TextFormat(textFactory, "Arial", 12f);
                 tfLayouts   = new Dictionary<int, TextLayout>();
             }
@@ -376,6 +380,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 llLines.Clear();
             }
             ChartControl?.InvalidateVisual();
+            ChartControl?.InvalidateVisual(true);
         }
 
         public int GetZoneCount() => zones.Count;
@@ -459,11 +464,13 @@ namespace NinjaTrader.NinjaScript.Indicators
     {
         private aaa4_zones[] cacheaaa4_zones;
         public aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
+        public aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, aaa4_zones.BreakMode rotaOption, int ticksMaxZona)
         {
             return aaa4_zones(Input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona);
         }
 
         public aaa4_zones aaa4_zones(ISeries<double> input, double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
+        public aaa4_zones aaa4_zones(ISeries<double> input, double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, aaa4_zones.BreakMode rotaOption, int ticksMaxZona)
         {
             if (cacheaaa4_zones != null)
                 for (int idx = 0; idx < cacheaaa4_zones.Length; idx++)
@@ -479,11 +486,14 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
     public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
     {
         public Indicators.aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
+        public Indicators.aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, aaa4_zones.BreakMode rotaOption, int ticksMaxZona)
         {
             return indicator.aaa4_zones(Input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona);
         }
 
         public Indicators.aaa4_zones aaa4_zones(ISeries<double> input , double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
+
+        public Indicators.aaa4_zones aaa4_zones(ISeries<double> input , double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, aaa4_zones.BreakMode rotaOption, int ticksMaxZona)
         {
             return indicator.aaa4_zones(input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona);
         }
@@ -495,11 +505,13 @@ namespace NinjaTrader.NinjaScript.Strategies
     public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
     {
         public Indicators.aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
+        public Indicators.aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, aaa4_zones.BreakMode rotaOption, int ticksMaxZona)
         {
             return indicator.aaa4_zones(Input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona);
         }
 
         public Indicators.aaa4_zones aaa4_zones(ISeries<double> input , double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
+        public Indicators.aaa4_zones aaa4_zones(ISeries<double> input , double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, aaa4_zones.BreakMode rotaOption, int ticksMaxZona)
         {
             return indicator.aaa4_zones(input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona);
         }
