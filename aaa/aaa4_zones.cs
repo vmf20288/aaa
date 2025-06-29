@@ -9,6 +9,9 @@ using NinjaTrader.Gui.Chart;
 using NinjaTrader.NinjaScript;
 using SharpDX;
 using SharpDX.Direct2D1;
+using SharpDX.DirectWrite;
+using D2DFactory = SharpDX.Direct2D1.Factory;
+using DWFactory  = SharpDX.DirectWrite.Factory;
 #endregion
 
 // ──────────────────────────────────────────────────────────────
@@ -16,6 +19,8 @@ using SharpDX.Direct2D1;
 // ──────────────────────────────────────────────────────────────
 namespace NinjaTrader.NinjaScript.Indicators
 {
+    public enum BreakMode { Immediate = 1, Reentry = 2 }
+
     public class aaa4_zones : Indicator
     {
         // ───────────────  USER PARAMETERS  ───────────────
@@ -43,21 +48,17 @@ namespace NinjaTrader.NinjaScript.Indicators
         [NinjaScriptProperty]
         public int BreakCandlesNeeded { get; set; }
 
-        [Display(Name = "Rota Option", Order = 5, GroupName = "Parameters",
-            Description = "1 = elimina inmediato, 2 = requiere dos rompimientos tras reingreso.")]
+        [Display(Name = "Break mode", Order = 5, GroupName = "Parameters")]
         [NinjaScriptProperty]
-        public string RotaOption { get; set; }
+        [Browsable(false)]
+        public BreakMode RotaOption { get; set; }
 
         [Range(1, int.MaxValue)]
         [Display(Name = "Ticks Max Zona", Order = 6, GroupName = "Parameters",
-            Description = "Altura máxima en ticks; > ⇒ no se crea zona.")]
+            Description = "Altura máxima en ticks; > ⇒ no se crea zona. Altura real = valor × TickSize.")]
         [NinjaScriptProperty]
         public int TicksMaxZona { get; set; }
 
-        [Display(Name = "Background White", Order = 10, GroupName = "Appearance",
-            Description = "Marca si tu gráfico tiene fondo blanco (líneas negras).")]
-        [NinjaScriptProperty]
-        public bool BackgroundWhite { get; set; }
 
         // ───────────────  INTERNAL STATE  ───────────────
         private List<ZoneInfo> zones;
@@ -65,8 +66,10 @@ namespace NinjaTrader.NinjaScript.Indicators
         private SolidColorBrush brushFill;
         private SolidColorBrush brushOutline;
         private StrokeStyle strokeStyleDotted;
-        private SharpDX.DirectWrite.Factory textFactory;
-        private SharpDX.DirectWrite.TextFormat textFormat;
+        private DWFactory textFactory;
+        private TextFormat textFormat;
+        private Dictionary<int, TextLayout> tfLayouts;
+        private readonly object _sync = new object();
 
         // ───────────────  LIFECYCLE  ───────────────
         protected override void OnStateChange()
@@ -82,30 +85,30 @@ namespace NinjaTrader.NinjaScript.Indicators
                 SizeWickVelaBase    = 0.32;
                 BatallaWickAgresiva = 0.13;
                 BreakCandlesNeeded  = 2;
-                RotaOption          = "1";
+                RotaOption          = BreakMode.Immediate;
                 TicksMaxZona        = 300;
-                BackgroundWhite     = false;
             }
             else if (State == State.Configure)
             {
-                AddDataSeries(BarsPeriodType.Minute, 60);
-                AddDataSeries(BarsPeriodType.Minute, 30);
-                AddDataSeries(BarsPeriodType.Minute, 15);
-                AddDataSeries(BarsPeriodType.Minute, 45);
-                AddDataSeries(BarsPeriodType.Minute, 90);
-                AddDataSeries(BarsPeriodType.Minute, 120);
-                AddDataSeries(BarsPeriodType.Minute, 180);
-                AddDataSeries(BarsPeriodType.Minute, 240);
-                AddDataSeries(BarsPeriodType.Minute, 10);
-                AddDataSeries(BarsPeriodType.Minute, 5);
+                AddDataSeries(BarsPeriodType.Minute, 5);   // BIP 1
+                AddDataSeries(BarsPeriodType.Minute, 10);  // BIP 2
+                AddDataSeries(BarsPeriodType.Minute, 15);  // BIP 3
+                AddDataSeries(BarsPeriodType.Minute, 30);  // BIP 4
+                AddDataSeries(BarsPeriodType.Minute, 45);  // BIP 5
+                AddDataSeries(BarsPeriodType.Minute, 60);  // BIP 6
+                AddDataSeries(BarsPeriodType.Minute, 90);  // BIP 7
+                AddDataSeries(BarsPeriodType.Minute, 120); // BIP 8
+                AddDataSeries(BarsPeriodType.Minute, 180); // optional BIP 9
+                AddDataSeries(BarsPeriodType.Minute, 240); // optional BIP 10
 
                 zones   = new List<ZoneInfo>();
                 llLines = new List<LLLineInfo>();
             }
             else if (State == State.DataLoaded)
             {
-                textFactory = new SharpDX.DirectWrite.Factory();
-                textFormat  = new SharpDX.DirectWrite.TextFormat(textFactory, "Arial", 12f);
+                textFactory = new DWFactory();
+                textFormat  = new TextFormat(textFactory, "Arial", 12f);
+                tfLayouts   = new Dictionary<int, TextLayout>();
             }
             else if (State == State.Terminated)
             {
@@ -119,8 +122,11 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (BarsInProgress == 0) return;
             if (CurrentBars[BarsInProgress] < 2) return;
 
-            CheckCreateZone();
-            CheckBreakZones();
+            lock (_sync)
+            {
+                CheckCreateZone();
+                CheckBreakZones();
+            }
         }
 
         // ───────────────  CREAR ZONA  ───────────────
@@ -143,6 +149,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             double baseBody = Math.Abs(baseClose - baseOpen);
             double nextBody = Math.Abs(nextClose - nextOpen);
+            double nextBodyEff = Math.Max(nextBody, TickSize);
 
             bool baseIsGreen = baseClose > baseOpen;
             bool baseIsRed   = baseClose < baseOpen;
@@ -154,9 +161,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 double wickAOI  = baseOpen - baseLow;
                 double wickAgg  = Math.Max(nextClose - nextLow, 0);  // solo mecha inferior
-                bool condBody   = baseBody < SizeVelaBase      * nextBody;
-                bool condAOI    = wickAOI  <= SizeWickVelaBase * nextBody;
-                bool condWickAg = (wickAgg / nextBody) <= BatallaWickAgresiva;
+                bool condBody   = baseBody < SizeVelaBase      * nextBodyEff;
+                bool condAOI    = wickAOI  <= SizeWickVelaBase * nextBodyEff;
+                bool condWickAg = (wickAgg / nextBodyEff) <= BatallaWickAgresiva;
 
                 if (condBody && condAOI && condWickAg)
                     CreateZone(baseTime, true, bip,
@@ -167,9 +174,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 double wickAOI  = baseHigh - baseOpen;
                 double wickAgg  = Math.Max(nextHigh - nextClose, 0); // solo mecha superior
-                bool condBody   = baseBody < SizeVelaBase      * nextBody;
-                bool condAOI    = wickAOI  <= SizeWickVelaBase * nextBody;
-                bool condWickAg = (wickAgg / nextBody) <= BatallaWickAgresiva;
+                bool condBody   = baseBody < SizeVelaBase      * nextBodyEff;
+                bool condAOI    = wickAOI  <= SizeWickVelaBase * nextBodyEff;
+                bool condWickAg = (wickAgg / nextBodyEff) <= BatallaWickAgresiva;
 
                 if (condBody && condAOI && condWickAg)
                     CreateZone(baseTime, false, bip,
@@ -204,7 +211,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                                   ? closeCurrent > z.TopPrice
                                   : closeCurrent < z.BottomPrice;
 
-                if (RotaOption == "2")
+                if (RotaOption == BreakMode.Reentry)
                 {
                     if (isOutside)
                     {
@@ -246,10 +253,18 @@ namespace NinjaTrader.NinjaScript.Indicators
             base.OnRender(chartControl, chartScale);
             EnsureResources();
 
+            List<ZoneInfo> snapZones;
+            List<LLLineInfo> snapLines;
+            lock (_sync)
+            {
+                snapZones = new List<ZoneInfo>(zones);
+                snapLines = new List<LLLineInfo>(llLines);
+            }
+
             float xRight = ChartPanel.X + ChartPanel.W;
 
             // Dibujar zonas
-            foreach (ZoneInfo z in zones)
+            foreach (ZoneInfo z in snapZones)
             {
                 float yTop      = chartScale.GetYByValue(z.TopPrice);
                 float yBottom   = chartScale.GetYByValue(z.BottomPrice);
@@ -280,7 +295,11 @@ namespace NinjaTrader.NinjaScript.Indicators
                 if (textFactory != null && textFormat != null)
                 {
                     string tf = bipToTf(z.DataSeries);
-                    using var tl = new SharpDX.DirectWrite.TextLayout(textFactory, tf, textFormat, 50, textFormat.FontSize);
+                    if (!tfLayouts.TryGetValue(z.DataSeries, out TextLayout tl))
+                    {
+                        tl = new TextLayout(textFactory, tf, textFormat, 50, textFormat.FontSize);
+                        tfLayouts[z.DataSeries] = tl;
+                    }
                     float tx = xRight - tl.Metrics.Width - 5;
                     float ty = z.IsSupply ? (yBaseOpen + 5) : (yBaseOpen - tl.Metrics.Height - 5);
                     RenderTarget.DrawTextLayout(new Vector2(tx, ty), tl, brushOutline);
@@ -288,7 +307,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
 
             // Dibujar AOI
-            foreach (LLLineInfo line in llLines)
+            foreach (LLLineInfo line in snapLines)
             {
                 float y        = chartScale.GetYByValue(line.Price);
                 float xBase     = chartControl.GetXByTime(line.Time);
@@ -309,23 +328,29 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
         }
 
+        public override void OnRenderTargetChanged()
+        {
+            base.OnRenderTargetChanged();
+            DisposeResources();
+            EnsureResources();
+        }
+
         // ───────────────  RESOURCES  ───────────────
         private void EnsureResources()
         {
+            if (RenderTarget == null)
+                return;
+
             if (brushFill == null)
                 brushFill = new SolidColorBrush(RenderTarget, new Color(0.8f, 0.8f, 0.8f, 0.4f));
 
-            Color c = BackgroundWhite
-                      ? new Color(0f, 0f, 0f, 1f)
-                      : new Color(1f, 1f, 1f, 1f);
-
-            brushOutline?.Dispose();
-            brushOutline = new SolidColorBrush(RenderTarget, c);
+            if (brushOutline == null)
+                brushOutline = new SolidColorBrush(RenderTarget, new Color(0f, 0f, 0f, 1f));
 
             if (strokeStyleDotted == null)
             {
                 var props = new StrokeStyleProperties { DashStyle = DashStyle.Custom };
-                strokeStyleDotted = new StrokeStyle(RenderTarget.Factory, props, new[] { 2f, 2f });
+                strokeStyleDotted = new StrokeStyle((D2DFactory)RenderTarget.Factory, props, new[] { 2f, 2f });
             }
         }
 
@@ -334,11 +359,22 @@ namespace NinjaTrader.NinjaScript.Indicators
             brushFill?.Dispose();        brushFill = null;
             brushOutline?.Dispose();     brushOutline = null;
             strokeStyleDotted?.Dispose(); strokeStyleDotted = null;
+            if (tfLayouts != null)
+            {
+                foreach (var tl in tfLayouts.Values)
+                    tl.Dispose();
+                tfLayouts.Clear();
+            }
             textFormat?.Dispose();       textFormat = null;
             textFactory?.Dispose();      textFactory = null;
         }
 
         // ───────────────  PUBLIC API  ───────────────
+        public void ForceRebuild()
+        {
+            ChartControl?.InvalidateVisual();
+        }
+
         public int GetZoneCount() => zones.Count;
 
         public bool TryGetZone(int index,
@@ -364,13 +400,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             return true;
         }
 
-        private string bipToTf(int bip) => bip switch
-        {
-            1 => "60", 2 => "30", 3 => "15", 4 => "45",
-            5 => "90", 6 => "120", 7 => "180", 8 => "240",
-            9 => "10", 10 => "5",
-            _ => BarsPeriod.Value.ToString()
-        };
+        private string bipToTf(int bip) => BarsArray[bip].BarsPeriod.Value.ToString();
 
         // ───────────────  INTERNAL CLASSES  ───────────────
         private class ZoneInfo
@@ -388,17 +418,17 @@ namespace NinjaTrader.NinjaScript.Indicators
                 Area3       = isSupply ? BottomPrice : TopPrice;
                 Area2       = (Area1 + Area3) / 2.0;
             }
-            public DateTime Time;
-            public bool     IsSupply;
-            public int      DataSeries;
-            public double   TopPrice;
-            public double   BottomPrice;
-            public double   AOI;
-            public double   Area1;
-            public double   Area2;
-            public double   Area3;
-            public int      ConsecutiveBreaks = 0;
-            public bool     HasBrokenOnce     = false;
+            public DateTime Time { get; }
+            public bool     IsSupply { get; }
+            public int      DataSeries { get; }
+            public double   TopPrice { get; }
+            public double   BottomPrice { get; }
+            public double   AOI { get; }
+            public double   Area1 { get; }
+            public double   Area2 { get; }
+            public double   Area3 { get; }
+            public int      ConsecutiveBreaks { get; set; } = 0;
+            public bool     HasBrokenOnce { get; set; } = false;
         }
 
         private class LLLineInfo
@@ -410,10 +440,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                 Price      = price;
                 DataSeries = dataSeries;
             }
-            public DateTime Time;
-            public bool     IsSupply;
-            public double   Price;
-            public int      DataSeries;
+            public DateTime Time { get; }
+            public bool     IsSupply { get; }
+            public double   Price { get; }
+            public int      DataSeries { get; }
         }
     }
 }
@@ -425,18 +455,18 @@ namespace NinjaTrader.NinjaScript.Indicators
     public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
     {
         private aaa4_zones[] cacheaaa4_zones;
-        public aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, string rotaOption, int ticksMaxZona, bool backgroundWhite)
+        public aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
         {
-            return aaa4_zones(Input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona, backgroundWhite);
+            return aaa4_zones(Input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona);
         }
 
-        public aaa4_zones aaa4_zones(ISeries<double> input, double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, string rotaOption, int ticksMaxZona, bool backgroundWhite)
+        public aaa4_zones aaa4_zones(ISeries<double> input, double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
         {
             if (cacheaaa4_zones != null)
                 for (int idx = 0; idx < cacheaaa4_zones.Length; idx++)
-                    if (cacheaaa4_zones[idx] != null && cacheaaa4_zones[idx].SizeVelaBase == sizeVelaBase && cacheaaa4_zones[idx].SizeWickVelaBase == sizeWickVelaBase && cacheaaa4_zones[idx].BatallaWickAgresiva == batallaWickAgresiva && cacheaaa4_zones[idx].BreakCandlesNeeded == breakCandlesNeeded && cacheaaa4_zones[idx].RotaOption == rotaOption && cacheaaa4_zones[idx].TicksMaxZona == ticksMaxZona && cacheaaa4_zones[idx].BackgroundWhite == backgroundWhite && cacheaaa4_zones[idx].EqualsInput(input))
+                    if (cacheaaa4_zones[idx] != null && cacheaaa4_zones[idx].SizeVelaBase == sizeVelaBase && cacheaaa4_zones[idx].SizeWickVelaBase == sizeWickVelaBase && cacheaaa4_zones[idx].BatallaWickAgresiva == batallaWickAgresiva && cacheaaa4_zones[idx].BreakCandlesNeeded == breakCandlesNeeded && cacheaaa4_zones[idx].RotaOption == rotaOption && cacheaaa4_zones[idx].TicksMaxZona == ticksMaxZona && cacheaaa4_zones[idx].EqualsInput(input))
                         return cacheaaa4_zones[idx];
-            return CacheIndicator<aaa4_zones>(new aaa4_zones(){ SizeVelaBase = sizeVelaBase, SizeWickVelaBase = sizeWickVelaBase, BatallaWickAgresiva = batallaWickAgresiva, BreakCandlesNeeded = breakCandlesNeeded, RotaOption = rotaOption, TicksMaxZona = ticksMaxZona, BackgroundWhite = backgroundWhite }, input, ref cacheaaa4_zones);
+            return CacheIndicator<aaa4_zones>(new aaa4_zones(){ SizeVelaBase = sizeVelaBase, SizeWickVelaBase = sizeWickVelaBase, BatallaWickAgresiva = batallaWickAgresiva, BreakCandlesNeeded = breakCandlesNeeded, RotaOption = rotaOption, TicksMaxZona = ticksMaxZona }, input, ref cacheaaa4_zones);
         }
     }
 }
@@ -445,14 +475,14 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
     public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
     {
-        public Indicators.aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, string rotaOption, int ticksMaxZona, bool backgroundWhite)
+        public Indicators.aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
         {
-            return indicator.aaa4_zones(Input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona, backgroundWhite);
+            return indicator.aaa4_zones(Input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona);
         }
 
-        public Indicators.aaa4_zones aaa4_zones(ISeries<double> input , double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, string rotaOption, int ticksMaxZona, bool backgroundWhite)
+        public Indicators.aaa4_zones aaa4_zones(ISeries<double> input , double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
         {
-            return indicator.aaa4_zones(input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona, backgroundWhite);
+            return indicator.aaa4_zones(input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona);
         }
     }
 }
@@ -461,14 +491,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
     public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
     {
-        public Indicators.aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, string rotaOption, int ticksMaxZona, bool backgroundWhite)
+        public Indicators.aaa4_zones aaa4_zones(double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
         {
-            return indicator.aaa4_zones(Input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona, backgroundWhite);
+            return indicator.aaa4_zones(Input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona);
         }
 
-        public Indicators.aaa4_zones aaa4_zones(ISeries<double> input , double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, string rotaOption, int ticksMaxZona, bool backgroundWhite)
+        public Indicators.aaa4_zones aaa4_zones(ISeries<double> input , double sizeVelaBase, double sizeWickVelaBase, double batallaWickAgresiva, int breakCandlesNeeded, BreakMode rotaOption, int ticksMaxZona)
         {
-            return indicator.aaa4_zones(input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona, backgroundWhite);
+            return indicator.aaa4_zones(input, sizeVelaBase, sizeWickVelaBase, batallaWickAgresiva, breakCandlesNeeded, rotaOption, ticksMaxZona);
         }
     }
 }
