@@ -10,6 +10,8 @@ using NinjaTrader.NinjaScript;
 using SharpDX;
 using SharpDX.Direct2D1;
 using SharpDX.DirectWrite;
+using D2DFactory = SharpDX.Direct2D1.Factory;
+using DWFactory  = SharpDX.DirectWrite.Factory;
 #endregion
 
 // ──────────────────────────────────────────────────────────────
@@ -66,6 +68,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         private SolidColorBrush brushFill;
         private SolidColorBrush brushOutline;
         private StrokeStyle strokeStyleDotted;
+        private DWFactory textFactory;
         private SharpDX.DirectWrite.Factory textFactory;
         private Factory textFactory;
         private TextFormat textFormat;
@@ -107,6 +110,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
             else if (State == State.DataLoaded)
             {
+                textFactory = new DWFactory();
                 textFactory = new SharpDX.DirectWrite.Factory();
                 textFactory = new Factory();
                 textFormat  = new TextFormat(textFactory, "Arial", 12f);
@@ -352,6 +356,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (strokeStyleDotted == null)
             {
                 var props = new StrokeStyleProperties { DashStyle = DashStyle.Custom };
+                strokeStyleDotted = new StrokeStyle((D2DFactory)RenderTarget.Factory, props, new[] { 2f, 2f });
                 strokeStyleDotted = new StrokeStyle((SharpDX.Direct2D1.Factory)RenderTarget.Factory, props, new[] { 2f, 2f });
             }
         }
@@ -374,6 +379,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         // ───────────────  PUBLIC API  ───────────────
         public void ForceRebuild()
         {
+            ChartControl?.InvalidateVisual();
             lock (_sync)
             {
                 zones.Clear();
