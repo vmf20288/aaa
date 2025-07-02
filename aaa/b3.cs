@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
+using System.Windows.Media;
 using NinjaTrader.Data;
 using NinjaTrader.Gui.Chart;
 using NinjaTrader.NinjaScript;
@@ -48,6 +49,15 @@ namespace NinjaTrader.NinjaScript.Indicators
             public double Volume => Ask + Bid;
         }
 
+        public class ImbalanceZone
+        {
+            public double HighPrice { get; set; }
+            public double LowPrice { get; set; }
+            public bool   IsAskDominant { get; set; }
+            public DateTime Created { get; set; }
+            public DrawingTool Rectangle { get; set; }
+        }
+
         private Dictionary<double, LevelStats> levels;
         private Dictionary<int, Dictionary<double, LevelStats>> barLevels;
         private Dictionary<int, BarStats> barTotals;
@@ -59,6 +69,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         public IReadOnlyDictionary<int, BarStats>     BarTotals            => barTotals;
         public double CurrentBidVolume  => curBid;
         public double CurrentAskVolume  => curAsk;
+        public List<ImbalanceZone> ActiveZones => activeZones;
 
         private double lastTradePrice = double.NaN;
         private double bestBid = double.NaN;
@@ -69,13 +80,51 @@ namespace NinjaTrader.NinjaScript.Indicators
         private float bottomRectHeight = 18f;
         private float bottomMargin = 20f;
 
+        // Imbalance tracking
+        private Dictionary<double, int> imbalanceDir;
+        private List<double> stackPrices;
+        private List<ImbalanceZone> activeZones;
+
         // ───────────────  PARAMETERS  ───────────────
         [NinjaScriptProperty]
         [Display(Name = "Tamano letra footprint", Order = 0, GroupName = "Parameters")]
         public float TamanoLetraFootprint { get; set; } = 12f;
 
+        [NinjaScriptProperty]
+        [Display(Name = "Imbalance On", Order = 1, GroupName = "Imbalance")]
+        public bool ImbalanceOn { get; set; } = false;
+
+        [NinjaScriptProperty]
+        [Display(Name = "Imbalance %", Order = 2, GroupName = "Imbalance")]
+        public double ImbalancePct { get; set; } = 300;
+
+        [NinjaScriptProperty]
+        [Display(Name = "Imbalance Stack", Order = 3, GroupName = "Imbalance")]
+        public int ImbalanceStack { get; set; } = 3;
+
+        [NinjaScriptProperty]
+        [Display(Name = "Offset Ticks", Order = 4, GroupName = "Imbalance")]
+        public int OffsetTicks { get; set; } = 8;
+
+        [NinjaScriptProperty]
+        [Display(Name = "Rect Fill", Order = 5, GroupName = "Imbalance")]
+        public Brush RectFill { get; set; } = Brushes.Brown;
+
+        [NinjaScriptProperty]
+        [Display(Name = "Rect Border Ask", Order = 6, GroupName = "Imbalance")]
+        public Brush RectBorderAsk { get; set; } = Brushes.Green;
+
+        [NinjaScriptProperty]
+        [Display(Name = "Rect Border Bid", Order = 7, GroupName = "Imbalance")]
+        public Brush RectBorderBid { get; set; } = Brushes.Red;
+
+        [NinjaScriptProperty]
+        [Display(Name = "Session Template", Order = 8, GroupName = "Imbalance")]
+        public string SessionName { get; set; } = "CME US Index Futures ETH";
+
         private SolidColorBrush brushText;
         private SolidColorBrush brushBorder;
+        private SolidColorBrush brushImbalance;
         private SharpDX.DirectWrite.TextFormat textFormat;
         private SharpDX.DirectWrite.TextFormat bottomTextFormat;
 
@@ -85,7 +134,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 Name                    = "b3";
                 Description             = "Footprint/absorption indicator";
-                Calculate               = Calculate.OnEachTick;
+                Calculate               = Calculate.OnPriceChange;
                 IsOverlay               = true;
                 DrawOnPricePanel        = false;
                 DisplayInDataBox        = false;
@@ -102,6 +151,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                 bestAsk   = double.NaN;
                 lastSide  = +1;
                 lastTradePrice = double.NaN;
+                imbalanceDir = new Dictionary<double, int>();
+                stackPrices  = new List<double>();
+                activeZones  = new List<ImbalanceZone>();
             }
             else if (State == State.DataLoaded)
             {
@@ -113,6 +165,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 brushText?.Dispose();
                 brushBorder?.Dispose();
+                brushImbalance?.Dispose();
                 textFormat?.Dispose();
                 bottomTextFormat?.Dispose();
             }
@@ -122,6 +175,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             brushText?.Dispose();   brushText   = null;
             brushBorder?.Dispose(); brushBorder = null;
+            brushImbalance?.Dispose(); brushImbalance = null;
         }
 
         private void BuildBrushes()
@@ -132,6 +186,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             brushText  = new SolidColorBrush(RenderTarget, new Color4(0f, 0f, 0f, 1f));
             brushBorder = new SolidColorBrush(RenderTarget, new Color4(0f, 0f, 0f, 1f));
+            brushImbalance = new SolidColorBrush(RenderTarget, new Color4(0f, 0f, 1f, 1f));
         }
 
         public override void OnRenderTargetChanged()
@@ -146,6 +201,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (BarsInProgress != 0)
                 return;
 
+            if (!ImbalanceOn)
+                return;
+
             if (e.MarketDataType == MarketDataType.Bid)
             {
                 bestBid = e.Price;
@@ -158,6 +216,30 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
             if (e.MarketDataType != MarketDataType.Last)
                 return;
+
+            // Remove outdated zones based on current price
+            for (int i = activeZones.Count - 1; i >= 0; i--)
+            {
+                var z = activeZones[i];
+                if (z.IsAskDominant)
+                {
+                    if (e.Price < z.LowPrice - OffsetTicks * TickSize)
+                    {
+                        if (z.Rectangle != null)
+                            RemoveDrawObject(z.Rectangle.Tag);
+                        activeZones.RemoveAt(i);
+                    }
+                }
+                else
+                {
+                    if (e.Price > z.HighPrice + OffsetTicks * TickSize)
+                    {
+                        if (z.Rectangle != null)
+                            RemoveDrawObject(z.Rectangle.Tag);
+                        activeZones.RemoveAt(i);
+                    }
+                }
+            }
 
             double price       = e.Price;
             double vol         = e.Volume;
@@ -195,6 +277,66 @@ namespace NinjaTrader.NinjaScript.Indicators
             else
                 curBid += vol;
 
+            // ─── Imbalance detection ─────────────────────────────
+            double askHere = ls.Ask;
+            double bidBelow = 0;
+            if (levels.TryGetValue(priceRounded - TickSize, out LevelStats lsBelow))
+                bidBelow = lsBelow.Bid;
+
+            int imbalance = 0;
+            double factor = ImbalancePct / 100.0;
+            if (bidBelow > 0 && askHere >= bidBelow * factor)
+                imbalance = +1;
+            else if (askHere > 0 && bidBelow >= askHere * factor)
+                imbalance = -1;
+            imbalanceDir[priceRounded] = imbalance;
+
+            if (imbalance != 0)
+            {
+                if (stackPrices.Count > 0 &&
+                    Math.Abs(stackPrices[stackPrices.Count - 1] - priceRounded) <= TickSize * 1.1 &&
+                    imbalanceDir[stackPrices[stackPrices.Count - 1]] == imbalance)
+                {
+                    stackPrices.Add(priceRounded);
+                }
+                else
+                {
+                    stackPrices.Clear();
+                    stackPrices.Add(priceRounded);
+                }
+
+                if (stackPrices.Count >= ImbalanceStack)
+                {
+                    double high = stackPrices[0];
+                    double low = stackPrices[0];
+                    foreach (var p in stackPrices)
+                    {
+                        if (p > high) high = p;
+                        if (p < low) low = p;
+                    }
+
+                    ChartControl.Dispatcher.InvokeAsync(() =>
+                    {
+                        string tag = "imbalanceZone" + activeZones.Count;
+                        var rect = Draw.Rectangle(this, tag, false, 0, high, int.MaxValue, low,
+                            imbalance > 0 ? RectBorderAsk : RectBorderBid, RectFill);
+                        activeZones.Add(new ImbalanceZone
+                        {
+                            HighPrice = high,
+                            LowPrice = low,
+                            IsAskDominant = imbalance > 0,
+                            Created = DateTime.Now,
+                            Rectangle = rect
+                        });
+                    });
+                    stackPrices.Clear();
+                }
+            }
+            else
+            {
+                stackPrices.Clear();
+            }
+
             // ─── Guardar estado para el siguiente tick ───────────────────────────────
             lastSide       = side;
             lastTradePrice = price;
@@ -219,6 +361,14 @@ namespace NinjaTrader.NinjaScript.Indicators
                 levels = new Dictionary<double, LevelStats>();
                 curBid  = 0;
                 curAsk  = 0;
+            }
+
+            if (Bars.IsFirstBarOfSession)
+            {
+                foreach (var z in activeZones)
+                    if (z.Rectangle != null)
+                        RemoveDrawObject(z.Rectangle.Tag);
+                activeZones.Clear();
             }
         }
 
@@ -262,12 +412,15 @@ namespace NinjaTrader.NinjaScript.Indicators
                     string txtAsk = ls.Ask.ToString("0");
                     float half = rect.Width / 2f;
 
+                    bool imbalanced = imbalanceDir.TryGetValue(price, out int imbSide) && imbSide != 0;
+                    var brush = imbalanced ? brushImbalance : brushText;
+
                     using (var layB = new SharpDX.DirectWrite.TextLayout(Core.Globals.DirectWriteFactory, txtBid, textFormat, half, rect.Height))
                     {
                         var m = layB.Metrics;
                         float tx = xLeft + (half - m.Width) / 2f;
                         float ty = y + (rect.Height - m.Height) / 2f;
-                        RenderTarget.DrawTextLayout(new Vector2(tx, ty), layB, brushText);
+                        RenderTarget.DrawTextLayout(new Vector2(tx, ty), layB, brush);
                     }
 
                     using (var layA = new SharpDX.DirectWrite.TextLayout(Core.Globals.DirectWriteFactory, txtAsk, textFormat, half, rect.Height))
@@ -275,7 +428,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                         var m = layA.Metrics;
                         float tx = xLeft + half + (half - m.Width) / 2f;
                         float ty = y + (rect.Height - m.Height) / 2f;
-                        RenderTarget.DrawTextLayout(new Vector2(tx, ty), layA, brushText);
+                        RenderTarget.DrawTextLayout(new Vector2(tx, ty), layA, brush);
                     }
                 }
             }
