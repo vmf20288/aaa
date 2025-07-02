@@ -13,11 +13,11 @@ using SharpDX;
 using SharpDX.Direct2D1;
 #endregion
 
-// b3.cs - Footprint/absorption indicator for NinjaTrader 8.1.5.1
+// b11fpi.cs - Footprint/imbalance indicator for NinjaTrader 8.1.5.1
 
 namespace NinjaTrader.NinjaScript.Indicators
 {
-    public class b3 : Indicator
+    public class b11fpi : Indicator
     {
         public readonly struct LevelStats
         {
@@ -108,7 +108,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         [NinjaScriptProperty]
         [Display(Name = "Rect Fill", Order = 5, GroupName = "Imbalance")]
-        public Brush RectFill { get; set; } = Brushes.Brown;
+        public Brush RectFill { get; set; } = new SolidColorBrush(Color.FromArgb(77, 165, 42, 42));
 
         [NinjaScriptProperty]
         [Display(Name = "Rect Border Ask", Order = 6, GroupName = "Imbalance")]
@@ -132,8 +132,8 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             if (State == State.SetDefaults)
             {
-                Name                    = "b3";
-                Description             = "Footprint/absorption indicator";
+                Name                    = "b11fpi";
+                Description             = "Footprint/imbalance indicator";
                 Calculate               = Calculate.OnPriceChange;
                 IsOverlay               = true;
                 DrawOnPricePanel        = false;
@@ -501,19 +501,19 @@ namespace NinjaTrader.NinjaScript.Indicators
 {
     public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
     {
-        private b3[] cacheb3;
-        public b3 b3(float tamanoLetraFootprint)
+        private b11fpi[] cacheb11fpi;
+        public b11fpi b11fpi(float tamanoLetraFootprint)
         {
-            return b3(Input, tamanoLetraFootprint);
+            return b11fpi(Input, tamanoLetraFootprint);
         }
 
-        public b3 b3(ISeries<double> input, float tamanoLetraFootprint)
+        public b11fpi b11fpi(ISeries<double> input, float tamanoLetraFootprint)
         {
-            if (cacheb3 != null)
-                for (int idx = 0; idx < cacheb3.Length; idx++)
-                    if (cacheb3[idx] != null && cacheb3[idx].TamanoLetraFootprint == tamanoLetraFootprint && cacheb3[idx].EqualsInput(input))
-                        return cacheb3[idx];
-            return CacheIndicator<b3>(new b3(){ TamanoLetraFootprint = tamanoLetraFootprint }, input, ref cacheb3);
+            if (cacheb11fpi != null)
+                for (int idx = 0; idx < cacheb11fpi.Length; idx++)
+                    if (cacheb11fpi[idx] != null && cacheb11fpi[idx].TamanoLetraFootprint == tamanoLetraFootprint && cacheb11fpi[idx].EqualsInput(input))
+                        return cacheb11fpi[idx];
+            return CacheIndicator<b11fpi>(new b11fpi(){ TamanoLetraFootprint = tamanoLetraFootprint }, input, ref cacheb11fpi);
         }
     }
 }

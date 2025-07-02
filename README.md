@@ -11,3 +11,4 @@ Custom NinjaTrader indicators updated for version 8.1.5.
 * `b2` – zone/vwap touch and limit order alerts
 * `b41_mintrade` – footprint/absorption indicator with minimum trade filter
 * `b4_bigorder` – marks large orders on the chart
+* `b11fpi` – footprint imbalance zones indicator
