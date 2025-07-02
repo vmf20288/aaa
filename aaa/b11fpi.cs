@@ -10,7 +10,6 @@ using NinjaTrader.NinjaScript;
 using NinjaTrader.NinjaScript.Indicators;
 using NinjaTrader.NinjaScript.DrawingTools;
 using SharpDX;
-using SharpDX.Direct2D1;
 #endregion
 
 // b11fpi.cs - Footprint/imbalance indicator for NinjaTrader 8.1.5.1
@@ -108,7 +107,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         [NinjaScriptProperty]
         [Display(Name = "Rect Fill", Order = 5, GroupName = "Imbalance")]
-        public Brush RectFill { get; set; } = new SolidColorBrush(Color.FromArgb(77, 165, 42, 42));
+        public Brush RectFill { get; set; } = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(77, 165, 42, 42));
 
         [NinjaScriptProperty]
         [Display(Name = "Rect Border Ask", Order = 6, GroupName = "Imbalance")]
@@ -122,9 +121,9 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "Session Template", Order = 8, GroupName = "Imbalance")]
         public string SessionName { get; set; } = "CME US Index Futures ETH";
 
-        private SolidColorBrush brushText;
-        private SolidColorBrush brushBorder;
-        private SolidColorBrush brushImbalance;
+        private SharpDX.Direct2D1.SolidColorBrush brushText;
+        private SharpDX.Direct2D1.SolidColorBrush brushBorder;
+        private SharpDX.Direct2D1.SolidColorBrush brushImbalance;
         private SharpDX.DirectWrite.TextFormat textFormat;
         private SharpDX.DirectWrite.TextFormat bottomTextFormat;
 
@@ -184,9 +183,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (RenderTarget == null)
                 return;
 
-            brushText  = new SolidColorBrush(RenderTarget, new Color4(0f, 0f, 0f, 1f));
-            brushBorder = new SolidColorBrush(RenderTarget, new Color4(0f, 0f, 0f, 1f));
-            brushImbalance = new SolidColorBrush(RenderTarget, new Color4(0f, 0f, 1f, 1f));
+            brushText  = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0f, 0f, 0f, 1f));
+            brushBorder = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0f, 0f, 0f, 1f));
+            brushImbalance = new SharpDX.Direct2D1.SolidColorBrush(RenderTarget, new Color4(0f, 0f, 1f, 1f));
         }
 
         public override void OnRenderTargetChanged()
