@@ -201,7 +201,8 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 if (condBody && condAOI && condWickAg)
                     CreateZone(baseTime, true, bip,
-                               Math.Max(nextHigh, baseHigh), baseOpen, baseLow);
+                               Math.Max(nextHigh, baseHigh), baseOpen, baseLow,
+                               nextBodyTicks);
             }
             // DEMAND
             else if (baseIsRed && nextIsGreen)
@@ -214,18 +215,138 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 if (condBody && condAOI && condWickAg)
                     CreateZone(baseTime, false, bip,
-                               baseOpen, Math.Min(nextLow, baseLow), baseHigh);
+                               baseOpen, Math.Min(nextLow, baseLow), baseHigh,
+                               nextBodyTicks);
             }
         }
 
         private void CreateZone(DateTime time, bool isSupply, int bip,
-                                double topPrice, double bottomPrice, double aoi)
+                                double topPrice, double bottomPrice, double aoi,
+                                double aggressiveTicks)
         {
             double zoneTicks = (topPrice - bottomPrice) / TickSize;
             if (zoneTicks > TicksMaxZona) return;
 
-            zones.Add(new ZoneInfo(time, isSupply, bip, topPrice, bottomPrice, aoi));
+            var z = new ZoneInfo(time, isSupply, bip, topPrice, bottomPrice, aoi,
+                                 aggressiveTicks);
+            z.TfLabel = bipToTf(bip);
+            zones.Add(z);
             llLines.Add(new LLLineInfo(time, isSupply, aoi, bip));
+            ConsolidateCluster(z);
+        }
+
+        private void ConsolidateCluster(ZoneInfo zone)
+        {
+            // Gather overlapping zones with same direction
+            List<int> cluster = new List<int>();
+            for (int i = 0; i < zones.Count; i++)
+            {
+                ZoneInfo z = zones[i];
+                if (z.IsSupply != zone.IsSupply) continue;
+                if (ZonesOverlap(z, zone))
+                    cluster.Add(i);
+            }
+            if (cluster.Count <= 1) return;
+
+            // Determine winner
+            int bestIdx = cluster[0];
+            foreach (int idx in cluster)
+                if (CompareZones(zones[idx], zones[bestIdx]) > 0)
+                    bestIdx = idx;
+
+            ZoneInfo winner = zones[bestIdx];
+            ZoneInfo? aoiCand = null;
+
+            SortedSet<int> losing = new SortedSet<int>();
+
+            for (int n = cluster.Count - 1; n >= 0; n--)
+            {
+                int idx = cluster[n];
+                if (idx == bestIdx) continue;
+                ZoneInfo looser = zones[idx];
+                losing.Add(looser.DataSeries);
+
+                if (IsAoiCandidate(winner, looser))
+                {
+                    if (aoiCand == null || looser.DataSeries > aoiCand.DataSeries)
+                        aoiCand = looser;
+                }
+
+                RemoveZone(idx);
+            }
+
+            if (aoiCand != null)
+            {
+                llLines.Add(new LLLineInfo(aoiCand.Time, aoiCand.IsSupply, aoiCand.AOI,
+                                           aoiCand.DataSeries, true));
+                losing.Add(aoiCand.DataSeries);
+            }
+
+            if (losing.Count > 0)
+            {
+                winner.LosingTFs.AddRange(losing);
+                string tfList = string.Join(",", SortTfs(losing));
+                winner.TfLabel = bipToTf(winner.DataSeries) + " /" + tfList;
+            }
+            else
+                winner.TfLabel = bipToTf(winner.DataSeries);
+        }
+
+        private static bool ZonesOverlap(ZoneInfo a, ZoneInfo b)
+        {
+            double aTop = Math.Max(a.TopPrice, a.BottomPrice);
+            double aBot = Math.Min(a.TopPrice, a.BottomPrice);
+            double bTop = Math.Max(b.TopPrice, b.BottomPrice);
+            double bBot = Math.Min(b.TopPrice, b.BottomPrice);
+            return aBot <= bTop && bBot <= aTop;
+        }
+
+        private int CompareZones(ZoneInfo a, ZoneInfo b)
+        {
+            bool aNever = !a.HasBrokenOnce && a.ConsecutiveBreaks == 0;
+            bool bNever = !b.HasBrokenOnce && b.ConsecutiveBreaks == 0;
+            if (aNever != bNever) return aNever ? 1 : -1;
+
+            if (a.AggressiveTicks != b.AggressiveTicks)
+                return a.AggressiveTicks > b.AggressiveTicks ? 1 : -1;
+
+            if (a.DataSeries != b.DataSeries)
+                return a.DataSeries > b.DataSeries ? 1 : -1;
+
+            if (a.Time != b.Time)
+                return a.Time > b.Time ? 1 : -1;
+
+            double aWidth = Math.Abs(a.TopPrice - a.BottomPrice);
+            double bWidth = Math.Abs(b.TopPrice - b.BottomPrice);
+            if (aWidth != bWidth)
+                return aWidth < bWidth ? 1 : -1;
+
+            return 0;
+        }
+
+        private bool IsAoiCandidate(ZoneInfo winner, ZoneInfo cand)
+        {
+            double diff;
+            if (winner.IsSupply)
+            {
+                if (cand.AOI >= winner.AOI) return false;
+                diff = winner.AOI - cand.AOI;
+            }
+            else
+            {
+                if (cand.AOI <= winner.AOI) return false;
+                diff = cand.AOI - winner.AOI;
+            }
+            return diff / TickSize >= 15;
+        }
+
+        private IEnumerable<string> SortTfs(IEnumerable<int> bips)
+        {
+            List<int> list = new List<int>(bips);
+            list.Sort();
+            List<string> tfs = new List<string>();
+            foreach (int b in list) tfs.Add(bipToTf(b));
+            return tfs;
         }
 
         // ───────────────  ROMPER ZONAS  ───────────────
@@ -264,10 +385,12 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
         }
 
-        private void RemoveZone(int idx)
+        private void RemoveZone(int idx, bool removeLine = true)
         {
             ZoneInfo z = zones[idx];
             zones.RemoveAt(idx);
+
+            if (!removeLine) return;
 
             for (int j = llLines.Count - 1; j >= 0; j--)
                 if (llLines[j].Time == z.Time &&
@@ -320,7 +443,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                                       brushOutline, 1f);
 
                 // etiqueta TF
-                var tl = GetOrCreateLayout(z.DataSeries);
+                var tl = GetOrCreateLayout(z.TfLabel);
                 float tx = xRight - tl.Metrics.Width - 5;
                 float ty = z.IsSupply ? (yBase + 5) : (yBase - tl.Metrics.Height - 5);
                 RenderTarget.DrawTextLayout(new Vector2(tx, ty), tl, brushOutline);
@@ -336,7 +459,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                                       new Vector2(xRight, y),
                                       brushOutline, 2f);
 
-                var tl = GetOrCreateLayout(l.DataSeries, "AOI ");
+                var tl = l.Inherited
+                    ? GetOrCreateLayout("/" + bipToTf(l.DataSeries))
+                    : GetOrCreateLayout("AOI " + bipToTf(l.DataSeries));
                 float tx = xRight - tl.Metrics.Width - 5;
                 float ty = l.IsSupply ? (y + 5) : (y - tl.Metrics.Height - 5);
                 RenderTarget.DrawTextLayout(new Vector2(tx, ty), tl, brushOutline);
@@ -408,6 +533,21 @@ namespace NinjaTrader.NinjaScript.Indicators
             return tl;
         }
 
+        private DWrite.TextLayout GetOrCreateLayout(string text)
+        {
+            if (tfLayouts == null)
+                tfLayouts = new Dictionary<int, DWrite.TextLayout>();
+
+            int key = text.GetHashCode();
+
+            if (!tfLayouts.TryGetValue(key, out var tl))
+            {
+                tl = new DWrite.TextLayout(dwFactory, text, textFormat, 100, textFormat.FontSize);
+                tfLayouts[key] = tl;
+            }
+            return tl;
+        }
+
         // ───────────────  PUBLIC API  ───────────────
         public void ForceRebuild()
         {
@@ -458,18 +598,21 @@ namespace NinjaTrader.NinjaScript.Indicators
         private class ZoneInfo
         {
             public ZoneInfo(DateTime time, bool isSupply, int dataSeries,
-                            double topPrice, double bottomPrice, double aoi)
+                            double topPrice, double bottomPrice, double aoi,
+                            double aggressiveTicks)
             {
-                Time        = time;
-                IsSupply    = isSupply;
-                DataSeries  = dataSeries;
-                TopPrice    = topPrice;
-                BottomPrice = bottomPrice;
-                AOI         = aoi;
+                Time            = time;
+                IsSupply        = isSupply;
+                DataSeries      = dataSeries;
+                TopPrice        = topPrice;
+                BottomPrice     = bottomPrice;
+                AOI             = aoi;
+                AggressiveTicks = aggressiveTicks;
 
                 Area1       = isSupply ? TopPrice    : BottomPrice;
                 Area3       = isSupply ? BottomPrice : TopPrice;
                 Area2       = (Area1 + Area3) / 2.0;
+                LosingTFs   = new List<int>();
             }
 
             public DateTime Time { get; }
@@ -482,24 +625,31 @@ namespace NinjaTrader.NinjaScript.Indicators
             public double   Area2 { get; }
             public double   Area3 { get; }
 
+            public double   AggressiveTicks { get; }
+            public List<int> LosingTFs { get; }
+            public string    TfLabel { get; set; }
+
             public int  ConsecutiveBreaks { get; set; }
             public bool HasBrokenOnce     { get; set; }
         }
 
         private class LLLineInfo
         {
-            public LLLineInfo(DateTime time, bool isSupply, double price, int dataSeries)
+            public LLLineInfo(DateTime time, bool isSupply, double price, int dataSeries,
+                             bool inherited = false)
             {
                 Time       = time;
                 IsSupply   = isSupply;
                 Price      = price;
                 DataSeries = dataSeries;
+                Inherited  = inherited;
             }
 
             public DateTime Time { get; }
             public bool     IsSupply { get; }
             public double   Price { get; }
             public int      DataSeries { get; }
+            public bool     Inherited { get; set; }
         }
     }
 
