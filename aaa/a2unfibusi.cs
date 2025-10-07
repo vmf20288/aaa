@@ -5,13 +5,13 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using System.Windows.Media;
 using NinjaTrader.Data;
 using NinjaTrader.Gui.Tools;
 using NinjaTrader.NinjaScript;
 using NinjaTrader.NinjaScript.BarsTypes;
 using NinjaTrader.NinjaScript.DrawingTools;
-using SharpDX.DirectWrite;
 #endregion
 
 // ======================================================================================================
@@ -77,7 +77,45 @@ namespace NinjaTrader.NinjaScript.Indicators
         // Colores/estilo (fijos en v1 para simplificar)
         private Brush brushHigh = Brushes.Red;
         private Brush brushLow  = Brushes.Green;
-        private const NinjaTrader.Gui.Tools.DashStyleHelper dashStyle = NinjaTrader.Gui.Tools.DashStyleHelper.Dash;
+
+        private static readonly MethodInfo drawLineTimeWithStyle;
+        private static readonly MethodInfo drawLineTimeWidthOnly;
+        private static readonly MethodInfo drawLineTimeBasic;
+        private static readonly object     dashStyleDashValue;
+
+        static a2unfibusi()
+        {
+            foreach (var method in typeof(Draw).GetMethods(BindingFlags.Public | BindingFlags.Static))
+            {
+                if (method.Name != "Line")
+                    continue;
+
+                var parameters = method.GetParameters();
+                if (parameters.Length == 10 && parameters[3].ParameterType == typeof(DateTime) && parameters[5].ParameterType == typeof(DateTime))
+                {
+                    if (parameters[8].ParameterType.IsEnum)
+                    {
+                        drawLineTimeWithStyle = method;
+                        try
+                        {
+                            dashStyleDashValue = Enum.Parse(parameters[8].ParameterType, "Dash");
+                        }
+                        catch
+                        {
+                            dashStyleDashValue = null;
+                        }
+                    }
+                }
+                else if (parameters.Length == 9 && parameters[3].ParameterType == typeof(DateTime) && parameters[5].ParameterType == typeof(DateTime) && parameters[8].ParameterType == typeof(int))
+                {
+                    drawLineTimeWidthOnly = method;
+                }
+                else if (parameters.Length == 8 && parameters[3].ParameterType == typeof(DateTime) && parameters[5].ParameterType == typeof(DateTime))
+                {
+                    drawLineTimeBasic = method;
+                }
+            }
+        }
 
         // -------------------------
         // Propiedades (usuario)
@@ -223,7 +261,22 @@ namespace NinjaTrader.NinjaScript.Indicators
         private void DrawLevelLine(UBLevel lvl, DateTime startTime, DateTime endTime)
         {
             Brush b = lvl.IsHigh ? brushHigh : brushLow;
-            Draw.Line(this, lvl.TagLine, false, startTime, lvl.Price, endTime, lvl.Price, b, dashStyle, LineWidth);
+            if (drawLineTimeWithStyle != null && dashStyleDashValue != null)
+            {
+                drawLineTimeWithStyle.Invoke(null, new object[] { this, lvl.TagLine, false, startTime, lvl.Price, endTime, lvl.Price, b, dashStyleDashValue, LineWidth });
+                return;
+            }
+
+            if (drawLineTimeWidthOnly != null)
+            {
+                drawLineTimeWidthOnly.Invoke(null, new object[] { this, lvl.TagLine, false, startTime, lvl.Price, endTime, lvl.Price, b, LineWidth });
+                return;
+            }
+
+            if (drawLineTimeBasic != null)
+            {
+                drawLineTimeBasic.Invoke(null, new object[] { this, lvl.TagLine, false, startTime, lvl.Price, endTime, lvl.Price, b });
+            }
         }
 
         private void DrawLevelText(UBLevel lvl)
@@ -233,7 +286,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             Brush  b = lvl.IsHigh ? brushHigh : brushLow;
 
             Draw.Text(this, lvl.TagText, false, "unfibusi",
-                      lvl.DetectedTime, y, 0, b, textFont, TextAlignment.Left, null, null, 0);
+                      lvl.DetectedTime, y, 0, b, textFont, System.Windows.TextAlignment.Left, null, null, 0);
         }
 
         private void ExtendLinesToRightEdge(DateTime endTime)
