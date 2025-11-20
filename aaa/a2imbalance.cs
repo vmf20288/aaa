@@ -131,6 +131,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 if (Bars != null && Bars.IsFirstBarOfSession)
                     ClearAllStackLines();
 
+                EnsureSurvivalCutoffTime();
+
                 if (activeLines.Count > 0)
                     CheckInvalidations();
 
