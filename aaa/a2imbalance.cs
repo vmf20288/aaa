@@ -56,6 +56,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 MinDeltaImbalance = 0; // delta mínimo diagonal
                 StackImbalance = 3; // niveles consecutivos
                 ToleranciaBorrarTicks = 6; // ticks
+                UsarVolumetricoInvalidacion = false;
             }
             else if (State == State.Configure)
             {
@@ -420,6 +421,10 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "Tolerancia borrar (ticks)", GroupName = "Parámetros", Order = 5)]
         [Range(0, 1000)]
         public int ToleranciaBorrarTicks { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Usar Volumetric para invalidación", GroupName = "Parámetros", Order = 6)]
+        public bool UsarVolumetricoInvalidacion { get; set; }
         #endregion
     }
 }
@@ -431,16 +436,16 @@ namespace NinjaTrader.NinjaScript.Indicators
     {
         private a2imbalance[] cachea2imbalance;
 
-        public a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks)
+        public a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool usarVolumetricoInvalidacion)
         {
-            return a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks);
+            return a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, usarVolumetricoInvalidacion);
         }
 
-        public a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks)
+        public a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool usarVolumetricoInvalidacion)
         {
             if (cachea2imbalance != null)
                 for (int idx = 0; idx < cachea2imbalance.Length; idx++)
-                    if (cachea2imbalance[idx] != null && cachea2imbalance[idx].TimeFrameVelas == timeFrameVelas && cachea2imbalance[idx].StackImbalance == stackImbalance && cachea2imbalance[idx].ImbalanceRatio == imbalanceRatio && cachea2imbalance[idx].MinDeltaImbalance == minDeltaImbalance && cachea2imbalance[idx].ToleranciaBorrarTicks == toleranciaBorrarTicks && cachea2imbalance[idx].EqualsInput(input))
+                    if (cachea2imbalance[idx] != null && cachea2imbalance[idx].TimeFrameVelas == timeFrameVelas && cachea2imbalance[idx].StackImbalance == stackImbalance && cachea2imbalance[idx].ImbalanceRatio == imbalanceRatio && cachea2imbalance[idx].MinDeltaImbalance == minDeltaImbalance && cachea2imbalance[idx].ToleranciaBorrarTicks == toleranciaBorrarTicks && cachea2imbalance[idx].UsarVolumetricoInvalidacion == usarVolumetricoInvalidacion && cachea2imbalance[idx].EqualsInput(input))
                         return cachea2imbalance[idx];
 
             return CacheIndicator<a2imbalance>(new a2imbalance()
@@ -449,7 +454,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 StackImbalance = stackImbalance,
                 ImbalanceRatio = imbalanceRatio,
                 MinDeltaImbalance = minDeltaImbalance,
-                ToleranciaBorrarTicks = toleranciaBorrarTicks
+                ToleranciaBorrarTicks = toleranciaBorrarTicks,
+                UsarVolumetricoInvalidacion = usarVolumetricoInvalidacion
             }, input, ref cachea2imbalance);
         }
     }
@@ -459,14 +465,14 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
     public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
     {
-        public Indicators.a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks)
+        public Indicators.a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool usarVolumetricoInvalidacion)
         {
-            return indicator.a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks);
+            return indicator.a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, usarVolumetricoInvalidacion);
         }
 
-        public Indicators.a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks)
+        public Indicators.a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool usarVolumetricoInvalidacion)
         {
-            return indicator.a2imbalance(input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks);
+            return indicator.a2imbalance(input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, usarVolumetricoInvalidacion);
         }
     }
 }
@@ -475,14 +481,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
     public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
     {
-        public Indicators.a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks)
+        public Indicators.a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool usarVolumetricoInvalidacion)
         {
-            return indicator.a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks);
+            return indicator.a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, usarVolumetricoInvalidacion);
         }
 
-        public Indicators.a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks)
+        public Indicators.a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool usarVolumetricoInvalidacion)
         {
-            return indicator.a2imbalance(input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks);
+            return indicator.a2imbalance(input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, usarVolumetricoInvalidacion);
         }
     }
 }
