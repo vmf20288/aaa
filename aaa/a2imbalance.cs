@@ -302,9 +302,15 @@ namespace NinjaTrader.NinjaScript.Indicators
         #region Borrado por invalidez y por sesión
         private void CheckInvalidations()
         {
-            double tol = ToleranciaBorrarTicks * TickSize;
             if (activeLines.Count == 0)
                 return;
+
+            bool useVolForInvalidation = volTickSize > 0 && volBip >= 0 && CurrentBars.Length > volBip && CurrentBars[volBip] >= 0;
+            double tickSize = useVolForInvalidation ? volTickSize : TickSize;
+            double tol = ToleranciaBorrarTicks * tickSize;
+
+            double currentHigh = useVolForInvalidation ? Highs[volBip][0] : High[0];
+            double currentLow = useVolForInvalidation ? Lows[volBip][0] : Low[0];
 
             var toFinalize = new List<string>();
             foreach (var kvp in activeLines)
@@ -313,13 +319,13 @@ namespace NinjaTrader.NinjaScript.Indicators
                 if (info.IsAskStack)
                 {
                     // soporte: borrar si rompe por debajo (Price - tol)
-                    if (Low[0] <= info.Price - tol)
+                    if (currentLow <= info.Price - tol)
                         toFinalize.Add(kvp.Key);
                 }
                 else
                 {
                     // resistencia: borrar si rompe por encima (Price + tol)
-                    if (High[0] >= info.Price + tol)
+                    if (currentHigh >= info.Price + tol)
                         toFinalize.Add(kvp.Key);
                 }
             }
