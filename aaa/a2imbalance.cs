@@ -306,7 +306,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (activeLines.Count == 0)
                 return;
 
-            bool useVolForInvalidation = UsarVolumetricoInvalidacion && volTickSize > 0 && volBip >= 0 && CurrentBars.Length > volBip && CurrentBars[volBip] >= 0;
+            bool useVolForInvalidation = volTickSize > 0 && volBip >= 0 && CurrentBars.Length > volBip && CurrentBars[volBip] >= 0;
             double tickSize = useVolForInvalidation ? volTickSize : TickSize;
             double tol = ToleranciaBorrarTicks * tickSize;
 
