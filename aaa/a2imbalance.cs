@@ -37,7 +37,6 @@ namespace NinjaTrader.NinjaScript.Indicators
             public DateTime BarTime { get; set; } // tiempo de la barra volumétrica donde se originó
             public double RunStartPrice { get; set; } // precio de inicio del stack (para reusar tag intrabar)
             public int OriginPrimaryIndex { get; set; } // índice de la barra primaria donde se creó
-            public DateTime OriginPrimaryTime { get; set; } // hora de la barra primaria donde se creó
         }
         #endregion
 
@@ -59,7 +58,6 @@ namespace NinjaTrader.NinjaScript.Indicators
                 StackImbalance = 3; // niveles consecutivos
                 ToleranciaBorrarTicks = 6; // ticks
                 FiltroSupervivencia = false;
-                SinFiltroUltimos30Min = false;
             }
             else if (State == State.Configure)
             {
@@ -217,6 +215,20 @@ namespace NinjaTrader.NinjaScript.Indicators
             return barsAgo;
         }
 
+        private int GetPrimaryIndex(DateTime barTime)
+        {
+            int idxOnPrimary = BarsArray[0].GetBar(barTime);
+            if (idxOnPrimary < 0)
+            {
+                if (CurrentBars[0] >= 0)
+                    idxOnPrimary = CurrentBars[0];
+                else
+                    idxOnPrimary = -1;
+            }
+
+            return idxOnPrimary;
+        }
+
         // v6: Crea o ACTUALIZA la línea del stack intrabar (misma barra y mismo runStartPrice/lado)
         // + DEDUPE por LADO en zona fija ±10 ticks ANTES de dibujar
         private void CreateOrUpdateStackLine(DateTime barTime, double runStartPrice, int runCount, bool isAskSide)
@@ -295,8 +307,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                     IsAskStack = isAskSide,
                     BarTime = barTime,
                     RunStartPrice = runStartPrice,
-                    OriginPrimaryIndex = CurrentBars[0],
-                    OriginPrimaryTime = Times[0][0]
+                    OriginPrimaryIndex = GetPrimaryIndex(barTime)
                 };
                 activeLines[tagRay] = infoNew;
             }
@@ -347,9 +358,12 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (!activeLines.TryGetValue(tagRay, out var info))
                 return;
 
-            int barsPassed = Math.Max(0, CurrentBars[0] - info.OriginPrimaryIndex);
-            bool applySurvivalFilter = FiltroSupervivencia && (!SinFiltroUltimos30Min || info.OriginPrimaryTime < survivalCutoffTime);
-            if (applySurvivalFilter && barsPassed <= 1)
+            int originIndex = info.OriginPrimaryIndex;
+            if (originIndex < 0)
+                originIndex = GetPrimaryIndex(info.BarTime);
+
+            int barsPassed = Math.Max(0, CurrentBars[0] - originIndex);
+            if (FiltroSupervivencia && barsPassed <= 1)
             {
                 RemoveStackLine(tagRay); // invalida demasiado rápido, no dibujar línea final
                 return;
@@ -440,32 +454,6 @@ namespace NinjaTrader.NinjaScript.Indicators
         [NinjaScriptProperty]
         [Display(Name = "Filtro de supervivencia", GroupName = "Parámetros", Order = 6)]
         public bool FiltroSupervivencia { get; set; }
-
-        [NinjaScriptProperty]
-        [Display(Name = "Sin filtro en últimos 30 min", GroupName = "Parámetros", Order = 7)]
-        public bool SinFiltroUltimos30Min { get; set; }
-        #endregion
-
-        #region Soporte filtro supervivencia
-        private DateTime survivalCutoffTime = DateTime.MinValue;
-        private bool survivalCutoffInitialized = false;
-
-        private void EnsureSurvivalCutoffTime()
-        {
-            if (survivalCutoffInitialized)
-                return;
-
-            if (BarsArray == null || BarsArray.Length == 0 || BarsArray[0] == null)
-                return;
-
-            int lastIndex = BarsArray[0].Count - 1;
-            if (lastIndex < 0)
-                return;
-
-            DateTime lastBarTime = BarsArray[0].GetTime(lastIndex);
-            survivalCutoffTime = lastBarTime.AddMinutes(-30);
-            survivalCutoffInitialized = true;
-        }
         #endregion
     }
 }
@@ -477,16 +465,16 @@ namespace NinjaTrader.NinjaScript.Indicators
     {
         private a2imbalance[] cachea2imbalance;
 
-        public a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, bool sinFiltroUltimos30Min)
+        public a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia)
         {
-            return a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, sinFiltroUltimos30Min);
+            return a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia);
         }
 
-        public a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, bool sinFiltroUltimos30Min)
+        public a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia)
         {
             if (cachea2imbalance != null)
                 for (int idx = 0; idx < cachea2imbalance.Length; idx++)
-                    if (cachea2imbalance[idx] != null && cachea2imbalance[idx].TimeFrameVelas == timeFrameVelas && cachea2imbalance[idx].StackImbalance == stackImbalance && cachea2imbalance[idx].ImbalanceRatio == imbalanceRatio && cachea2imbalance[idx].MinDeltaImbalance == minDeltaImbalance && cachea2imbalance[idx].ToleranciaBorrarTicks == toleranciaBorrarTicks && cachea2imbalance[idx].FiltroSupervivencia == filtroSupervivencia && cachea2imbalance[idx].SinFiltroUltimos30Min == sinFiltroUltimos30Min && cachea2imbalance[idx].EqualsInput(input))
+                    if (cachea2imbalance[idx] != null && cachea2imbalance[idx].TimeFrameVelas == timeFrameVelas && cachea2imbalance[idx].StackImbalance == stackImbalance && cachea2imbalance[idx].ImbalanceRatio == imbalanceRatio && cachea2imbalance[idx].MinDeltaImbalance == minDeltaImbalance && cachea2imbalance[idx].ToleranciaBorrarTicks == toleranciaBorrarTicks && cachea2imbalance[idx].FiltroSupervivencia == filtroSupervivencia && cachea2imbalance[idx].EqualsInput(input))
                         return cachea2imbalance[idx];
 
             return CacheIndicator<a2imbalance>(new a2imbalance()
@@ -496,8 +484,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 ImbalanceRatio = imbalanceRatio,
                 MinDeltaImbalance = minDeltaImbalance,
                 ToleranciaBorrarTicks = toleranciaBorrarTicks,
-                FiltroSupervivencia = filtroSupervivencia,
-                SinFiltroUltimos30Min = sinFiltroUltimos30Min
+                FiltroSupervivencia = filtroSupervivencia
             }, input, ref cachea2imbalance);
         }
     }
@@ -507,14 +494,14 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
     public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
     {
-        public Indicators.a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, bool sinFiltroUltimos30Min)
+        public Indicators.a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia)
         {
-            return indicator.a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, sinFiltroUltimos30Min);
+            return indicator.a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia);
         }
 
-        public Indicators.a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, bool sinFiltroUltimos30Min)
+        public Indicators.a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia)
         {
-            return indicator.a2imbalance(input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, sinFiltroUltimos30Min);
+            return indicator.a2imbalance(input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia);
         }
     }
 }
@@ -523,14 +510,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
     public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
     {
-        public Indicators.a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, bool sinFiltroUltimos30Min)
+        public Indicators.a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia)
         {
-            return indicator.a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, sinFiltroUltimos30Min);
+            return indicator.a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia);
         }
 
-        public Indicators.a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, bool sinFiltroUltimos30Min)
+        public Indicators.a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia)
         {
-            return indicator.a2imbalance(input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, sinFiltroUltimos30Min);
+            return indicator.a2imbalance(input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia);
         }
     }
 }
