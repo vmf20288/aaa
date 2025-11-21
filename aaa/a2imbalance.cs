@@ -423,6 +423,15 @@ namespace NinjaTrader.NinjaScript.Indicators
                 /* ignorar */
             }
         }
+
+        // V6: mantener por compatibilidad — esta rutina era usada para preparar
+        // la lógica de supervivencia, pero en la versión actual no requiere
+        // acción explícita. Se deja como stub para evitar errores de compilación
+        // cuando se llame desde OnBarUpdate.
+        private void EnsureSurvivalCutoffTime()
+        {
+            // No-op
+        }
         #endregion
 
         #region Propiedades (parámetros)
