@@ -131,16 +131,13 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "MinVolume (opuesto)", Description = "Volumen mínimo en el lado opuesto en el extremo (Bid@High / Ask@Low).", Order = 2, GroupName = "a2unfibusi")]
         public int MinOppositeVolume { get; set; } = 10;
 
-        [NinjaScriptProperty]
-        [Display(Name = "Reset al inicio de sesión", Description = "Borra niveles al comenzar una nueva sesión.", Order = 3, GroupName = "a2unfibusi")]
+        [Browsable(false), XmlIgnore]
         public bool ResetAtSessionStart { get; set; } = true;
 
-        [Range(1, 10)]
-        [Display(Name = "Grosor línea", Description = "Ancho de la línea punteada.", Order = 10, GroupName = "Estilo")]
+        [Browsable(false), XmlIgnore]
         public int LineWidth { get; set; } = 2;
 
-        [Range(1, 10)]
-        [Display(Name = "Offset texto (ticks)", Description = "Separación vertical (en ticks) para el texto 'unfibusi'.", Order = 11, GroupName = "Estilo")]
+        [Browsable(false), XmlIgnore]
         public int TextOffsetTicks { get; set; } = 1;
 
         // -------------------------
@@ -177,11 +174,11 @@ namespace NinjaTrader.NinjaScript.Indicators
         protected override void OnBarUpdate()
         {
             // Seguridad: necesitamos que existan ambas series (primaria e interna)
-            if (CurrentBar < 0 || computeSeriesIndex < 1 || BarsArray == null || BarsArray.Length <= computeSeriesIndex)
+            if (computeSeriesIndex < 0 || BarsArray == null || BarsArray.Length <= computeSeriesIndex || CurrentBar < 0)
                 return;
 
             // 1) Reset al inicio de sesión (sobre la serie de CÁLCULO)
-            if (BarsInProgress == computeSeriesIndex && ResetAtSessionStart && Bars.IsFirstBarOfSession)
+            if (BarsInProgress == computeSeriesIndex && BarsArray[computeSeriesIndex].IsFirstBarOfSession)
                 ClearAllLevels();
 
             // 2) Detección de UB SOLO en la serie de CÁLCULO (volumétrica interna)
@@ -208,8 +205,6 @@ namespace NinjaTrader.NinjaScript.Indicators
                 return;
 
             int cb = CurrentBars[computeSeriesIndex];
-            if (cb < 0)
-                return;
 
             var volumes = volType.Volumes[cb];
             double hi = Highs[computeSeriesIndex][0];
@@ -296,6 +291,24 @@ namespace NinjaTrader.NinjaScript.Indicators
                 DrawLevelLine(lvl, lvl.DetectedTime, endTime);
         }
 
+        protected override void OnMarketData(MarketDataEventArgs e)
+        {
+            if (e.MarketDataType != MarketDataType.Last || levels.Count == 0)
+                return;
+
+            double last = Instrument.MasterInstrument.RoundToTickSize(e.Price);
+            var toRemove = new List<UBLevel>();
+
+            foreach (var lvl in levels)
+            {
+                if (IsLevelCompleted(lvl, last, last))
+                    toRemove.Add(lvl);
+            }
+
+            foreach (var lvl in toRemove)
+                RemoveLevel(lvl);
+        }
+
         private void TestAndRemoveCompletedLevels(int seriesIndexUpdated)
         {
             if (levels.Count == 0)
@@ -326,11 +339,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             foreach (var lvl in levels)
             {
-                bool completed = lvl.IsHigh
-                                 ? upThr   >= lvl.Price + TickSize
-                                 : downThr <= lvl.Price - TickSize;
-
-                if (completed)
+                if (IsLevelCompleted(lvl, upThr, downThr))
                     toRemove.Add(lvl);
             }
 
@@ -354,6 +363,11 @@ namespace NinjaTrader.NinjaScript.Indicators
             foreach (var lvl in levels.ToList())
                 RemoveLevel(lvl);
         }
+
+        private bool IsLevelCompleted(UBLevel lvl, double upThr, double downThr)
+            => lvl.IsHigh
+                   ? upThr   >= lvl.Price + TickSize
+                   : downThr <= lvl.Price - TickSize;
 
         private static string BuildKey(double price, bool isHigh)
             => $"{(isHigh ? "H" : "L")}@{price.ToString("0.#####", CultureInfo.InvariantCulture)}";
