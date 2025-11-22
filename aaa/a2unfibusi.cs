@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
+using System.Xml.Serialization;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
@@ -174,7 +175,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         protected override void OnBarUpdate()
         {
             // Seguridad: necesitamos que existan ambas series (primaria e interna)
-            if (computeSeriesIndex < 0 || BarsArray == null || BarsArray.Length <= computeSeriesIndex || CurrentBar < 0)
+            if (computeSeriesIndex < 0 || BarsArray == null || BarsArray.Length <= computeSeriesIndex)
                 return;
 
             // 1) Reset al inicio de sesión (sobre la serie de CÁLCULO)
