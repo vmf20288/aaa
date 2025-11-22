@@ -130,7 +130,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         [NinjaScriptProperty]
         [Range(1, int.MaxValue)]
         [Display(Name = "MinVolume (opuesto)", Description = "Volumen mínimo en el lado opuesto en el extremo (Bid@High / Ask@Low).", Order = 2, GroupName = "a2unfibusi")]
-        public int MinOppositeVolume { get; set; } = 10;
+        public int MinOppositeVolume { get; set; } = 1;
 
         [Browsable(false), XmlIgnore]
         public bool ResetAtSessionStart { get; set; } = true;
