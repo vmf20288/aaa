@@ -274,7 +274,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             // Serie primaria: solo reseteamos salidas numéricas
             if (BarsInProgress == 0)
             {
-                if (Bars.IsFirstBarOfSession)
+                if (Bars.IsFirstBarOfSession && IsFirstTickOfBar)
                     ResetForNewSession();
 
                 volumeSeries[0] = double.NaN;
