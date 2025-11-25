@@ -79,7 +79,8 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             public string TagLineActive;    // Ray activo (extendiendo)
             public string TagLineFrozen;    // Línea fija al invalidar
-            public string TagText;          // Texto "MinTrade (VOL)"
+            public string TagText;          // Texto histórico al invalidar
+            public string TagTextRight;     // Texto lateral mientras está activo
             public double Price;            // Nivel horizontal (precio ancla del clúster)
             public long Volume;             // Volumen total ACUMULADO del nivel (considerando fusiones)
             public MinTradeSide Side;       // Lado del clúster (para el color del texto)
@@ -178,6 +179,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                     RemoveDrawObjectSafe(lv.TagLineActive);
                     RemoveDrawObjectSafe(lv.TagLineFrozen);
                     RemoveDrawObjectSafe(lv.TagText);
+                    RemoveDrawObjectSafe(lv.TagTextRight);
                 }
                 levels.Clear();
             }
@@ -279,6 +281,9 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 volumeSeries[0] = double.NaN;
                 priceSeries[0]  = double.NaN;
+
+                // Mantener etiquetas laterales pegadas a la derecha
+                UpdateActiveRightLabels();
                 return;
             }
 
@@ -511,6 +516,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 TagLineActive    = tagBase + "_line",
                 TagLineFrozen    = tagBase + "_frozen",
                 TagText          = tagBase + "_text",
+                TagTextRight     = tagBase + "_text_right",
                 Price            = price,
                 Volume           = volume,
                 Side             = side,
@@ -522,10 +528,10 @@ namespace NinjaTrader.NinjaScript.Indicators
             };
             levels[tagBase] = lv;
 
-            // Dibujo inicial: Ray NEUTRAL (gris)
-            DrawActiveRay(lv, Brushes.DimGray);
+            // Dibujo inicial: Ray NEUTRAL (amarillo)
+            DrawActiveRay(lv, Brushes.Gold);
 
-            // Texto del evento (color por lado)
+            // Texto lateral mientras está activo (color por lado)
             DrawEventText(lv);
 
             // Salidas públicas (último evento)
@@ -615,9 +621,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private void DrawEventText(MinTradeLevel lv)
         {
-            Brush textBrush = Brushes.Gray;
-            if (lv.Side == MinTradeSide.Bid) textBrush = Brushes.Red;
-            else if (lv.Side == MinTradeSide.Ask) textBrush = Brushes.Green;
+            Brush textBrush = GetSideBrush(lv.Side);
 
             double ts = TickSize > 0 ? TickSize : (Instrument?.MasterInstrument?.TickSize ?? 0.0);
             if (ts <= 0) ts = Math.Max(Math.Abs(lv.Price) * 1e-6, 1e-4);
@@ -625,9 +629,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             double yText = lv.Price + (2 * ts);
 
             Draw.Text(this,
-                      lv.TagText,
-                      $"MinTrade ({lv.Volume})",
-                      GetPrimaryBarsAgo(lv.TickTime),
+                      lv.TagTextRight,
+                      $"{lv.Volume}",
+                      0,
                       yText,
                       textBrush);
         }
@@ -635,10 +639,9 @@ namespace NinjaTrader.NinjaScript.Indicators
         private void FreezeLineAtCurrent(MinTradeLevel lv)
         {
             RemoveDrawObjectSafe(lv.TagLineActive);
+            RemoveDrawObjectSafe(lv.TagTextRight);
 
             Brush segBrush = Brushes.DimGray;
-            if (lv.State == LevelState.Supply) segBrush = Brushes.Red;
-            else if (lv.State == LevelState.Demand) segBrush = Brushes.Green;
 
             int startBarsAgo = GetPrimaryBarsAgo(lv.TickTime);
             if (startBarsAgo == int.MinValue) return;
@@ -654,11 +657,49 @@ namespace NinjaTrader.NinjaScript.Indicators
             var line = Draw.Line(this, lv.TagLineFrozen, false, startBarsAgo, lv.Price, endBarsAgo, lv.Price, segBrush, DashStyleHelper.Solid, 2);
             if (line != null && line.Stroke != null)
                 line.Stroke.Width = 2;
+
+            DrawHistoricalText(lv);
         }
 
         private void RemoveDrawObjectSafe(string tag)
         {
             try { RemoveDrawObject(tag); } catch { /* ignore */ }
+        }
+
+        private Brush GetSideBrush(MinTradeSide side)
+        {
+            if (side == MinTradeSide.Bid) return Brushes.Red;
+            if (side == MinTradeSide.Ask) return Brushes.Green;
+            return Brushes.Gray;
+        }
+
+        private void DrawHistoricalText(MinTradeLevel lv)
+        {
+            Brush textBrush = GetSideBrush(lv.Side);
+
+            double ts = TickSize > 0 ? TickSize : (Instrument?.MasterInstrument?.TickSize ?? 0.0);
+            if (ts <= 0) ts = Math.Max(Math.Abs(lv.Price) * 1e-6, 1e-4);
+
+            double yText = lv.Price + (2 * ts);
+
+            Draw.Text(this,
+                      lv.TagText,
+                      $"{lv.Volume}",
+                      0,
+                      yText,
+                      textBrush);
+        }
+
+        private void UpdateActiveRightLabels()
+        {
+            if (levels.Count == 0)
+                return;
+
+            foreach (var lv in levels.Values)
+            {
+                if (!lv.Invalidated)
+                    DrawEventText(lv);
+            }
         }
         #endregion
     }
