@@ -29,13 +29,20 @@
 //       * Activación inmediata o tras X velas de 1m; invalida por cruce con margen de ticks.
 //       * Dibuja rayos horizontales "VolCluster" y expone NivelExpuesto / UltimoNivelActual.
 //       * Es independiente de MinTrade e Imbalance y usa el time frame global.
+//   - Módulo MultipleNode (X):
+//       * Detecta "multiple nodes" de POC en barras Volumétricas (Order Flow+) de GlobalTimeFrameMinutes
+//         dentro de una ventana temporal de VentanaMin minutos agrupando POCs a ±TicksAlrededor.
+//       * Si el cluster tiene tamaño ≥ 2, dibuja un rayo horizontal etiquetado "multiple node".
+//       * Clasifica con el primer cierre de 1m posterior: cierre > nivel → Demand (verde); cierre < nivel → Supply (rojo).
+//       * Borra por cierre de 1m con tolerancia direccional (ToleranciaTicks) manteniendo el histórico del nivel.
 //   - Módulo Global:
 //       * MinTrade (ON/OFF): activa/desactiva completamente el módulo MinTrade (detección y dibujo).
 //       * Imbalance (IM) (ON/OFF): interruptor maestro del módulo Imbalance.
 //       * VolumeCluster (VN) (ON/OFF): interruptor maestro del módulo VolumeCluster.
+//       * MultipleNode (X) (ON/OFF): interruptor maestro del módulo MultipleNode.
 //       * Reset session (ON/OFF): controla si se limpian niveles y estado al inicio de cada nueva sesión
 //         (ON = igual que ahora, OFF = conserva niveles históricos en el gráfico).
-//       * Time frame (min): marco temporal global que usan los módulos basados en velas/Volumetric (IM y VN).
+//       * Time frame (min): marco temporal global que usan los módulos basados en velas/Volumetric (IM, VN y X).
 //
 // Parámetros expuestos (solo los acordados):
 //   - MinTrade (int)                 -> umbral de volumen del clúster para generar el nivel.
@@ -63,14 +70,17 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
+using System.Linq;
 using System.Reflection;
 using System.Xml.Serialization;
 using System.Windows.Media;
+using System.Windows;
 
 using NinjaTrader.Cbi;
 using NinjaTrader.Core.FloatingPoint;
 using NinjaTrader.Data;
 using NinjaTrader.Gui;              // DashStyleHelper
+using NinjaTrader.Gui.Chart;
 using NinjaTrader.Gui.Tools;        // SimpleFont
 using NinjaTrader.NinjaScript;
 using NinjaTrader.NinjaScript.BarsTypes;
@@ -174,6 +184,35 @@ namespace NinjaTrader.NinjaScript.Indicators
         private Series<double> vnNivelExpuesto;
         private double         vnUltimoNivelActual = double.NaN;
 
+        // --- MultipleNode (X) ---
+        #region MultipleNode (X) – campos y estructuras
+        private enum NodeState { Pending = 0, Demand = 1, Supply = 2 }
+
+        private class Level
+        {
+            public string   Tag;
+            public double   Price;
+            public DateTime StartTime;
+            public DateTime NextMinuteCloseTime;
+            public NodeState State;
+            public bool     Active;
+            public DateTime? InvalidationTime;
+        }
+
+        private readonly List<Level> multipleNodeActiveLevels = new List<Level>();
+        private int                   multipleNodeUniqueId    = 0;
+        private string                multipleNodeTagPrefix;
+        private SimpleFont            multipleNodeLabelFont;
+        private double                multipleNodeTickSize;
+
+        private NinjaTrader.NinjaScript.LinePriceMode multipleNodeModoPrecio = NinjaTrader.NinjaScript.LinePriceMode.Average;
+        private bool                                              multipleNodeBorrarSoloSiCierre = true;
+        private NinjaTrader.NinjaScript.CloseSource               multipleNodeCierreParaBorrar   = NinjaTrader.NinjaScript.CloseSource.OneMinute;
+
+        private double MultipleNodeDedupTolerance => Math.Max(multipleNodeTickSize, (MultipleNodeTicksAlrededor * multipleNodeTickSize) / 2.0);
+        private double MultipleNodeCloseTouchEps   => multipleNodeTickSize * 0.1;
+        #endregion
+
         private class StackLine
         {
             public string TagRay { get; set; }
@@ -203,8 +242,12 @@ namespace NinjaTrader.NinjaScript.Indicators
         public bool VolumeClusterModuleOn { get; set; }
 
         [NinjaScriptProperty]
+        [Display(Name = "MultipleNode (X) (ON/OFF)", Order = 4, GroupName = "Global")]
+        public bool MultipleNodeModuleOn { get; set; }
+
+        [NinjaScriptProperty]
         [Range(1, int.MaxValue)]
-        [Display(Name = "Time frame (min)", Order = 4, GroupName = "Global")]
+        [Display(Name = "Time frame (min)", Order = 5, GroupName = "Global")]
         public int GlobalTimeFrameMinutes { get; set; }
 
         [NinjaScriptProperty]
@@ -289,6 +332,21 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "Margen de ticks: borrar", GroupName = "VolumeCluster (VN)", Order = 3)]
         public int MargenTicksBorre { get; set; }
 
+        [NinjaScriptProperty]
+        [Range(1, 1440)]
+        [Display(Name = "Dentro de cuántos minutos", GroupName = "MultipleNode (X)", Order = 1)]
+        public int MultipleNodeVentanaMin { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, 200)]
+        [Display(Name = "Ticks alrededor", GroupName = "MultipleNode (X)", Order = 2)]
+        public int MultipleNodeTicksAlrededor { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0, 200)]
+        [Display(Name = "Tolerancia ticks (cierre 1m)", GroupName = "MultipleNode (X)", Order = 3)]
+        public int MultipleNodeToleranciaTicks { get; set; }
+
         // Salidas públicas (último evento)
         [Browsable(false), XmlIgnore] public Series<double> LastMinTradeVolume => volumeSeries;
         [Browsable(false), XmlIgnore] public Series<double> LastMinTradePrice  => priceSeries;
@@ -367,6 +425,15 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             if (vnNivelExpuesto != null)
                 vnNivelExpuesto[0] = double.NaN;
+
+            if (multipleNodeActiveLevels.Count > 0)
+            {
+                foreach (var lvl in multipleNodeActiveLevels)
+                    DeleteMultipleNodeLevel(lvl);
+                multipleNodeActiveLevels.Clear();
+            }
+
+            multipleNodeUniqueId = 0;
         }
 
         #region OnStateChange
@@ -387,6 +454,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 ResetSessionOnNewSession = true;
                 ImbalanceModuleOn        = true;
                 VolumeClusterModuleOn    = true;
+                MultipleNodeModuleOn     = true;
                 GlobalTimeFrameMinutes   = 5;
                 MinTrade                = 25;
                 ToleranciaTicks         = 8;
@@ -405,6 +473,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                 TicksAlrededor          = 6;
                 MinVelasConfirmacion    = 0;
                 MargenTicksBorre        = 6;
+                MultipleNodeVentanaMin       = 25;
+                MultipleNodeTicksAlrededor   = 6;
+                MultipleNodeToleranciaTicks  = 6;
 
                 AddPlot(Brushes.Transparent, "LastMinTradeVolume");
                 AddPlot(Brushes.Transparent, "LastMinTradePrice");
@@ -434,6 +505,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                 }
 
                 vnNivelExpuesto = new Series<double>(this);
+
+                multipleNodeTickSize  = Instrument.MasterInstrument.TickSize;
+                multipleNodeTagPrefix = $"a2MN_{Instrument.MasterInstrument.Name}";
+                multipleNodeLabelFont = new SimpleFont("Arial", 10);
             }
         }
         #endregion
@@ -486,51 +561,91 @@ namespace NinjaTrader.NinjaScript.Indicators
             // --- CIERRE 1 MINUTO: clasificar e invalidar ---
             if (BarsInProgress == 1)
             {
-                if (MinTradeModuleOn && IsFirstTickOfBar && CurrentBars[1] >= 1)
+                if (IsFirstTickOfBar && CurrentBars[1] >= 1)
                 {
                     int    closedIdx = CurrentBars[1] - 1; // índice de la barra 1m que acaba de cerrar
                     double close1m   = Closes[1][1];
 
-                    if (levels.Count > 0)
+                    if (MinTradeModuleOn)
                     {
-                        var keys = new List<string>(levels.Keys);
-                        foreach (var key in keys)
+                        if (levels.Count > 0)
                         {
-                            if (!levels.TryGetValue(key, out var lv)) continue;
-
-                            // 1) CLASIFICACIÓN: primer cierre 1m posterior al evento
-                            if (!lv.Classified && closedIdx >= lv.EventMinuteIndex)
+                            var keys = new List<string>(levels.Keys);
+                            foreach (var key in keys)
                             {
-                                if (close1m > lv.Price)
+                                if (!levels.TryGetValue(key, out var lv)) continue;
+
+                                // 1) CLASIFICACIÓN: primer cierre 1m posterior al evento
+                                if (!lv.Classified && closedIdx >= lv.EventMinuteIndex)
                                 {
-                                    lv.State      = LevelState.Demand;
-                                    lv.Classified = true;
-                                    UpdateActiveRayColor(lv, Brushes.Green);
+                                    if (close1m > lv.Price)
+                                    {
+                                        lv.State      = LevelState.Demand;
+                                        lv.Classified = true;
+                                        UpdateActiveRayColor(lv, Brushes.Green);
+                                    }
+                                    else if (close1m < lv.Price)
+                                    {
+                                        lv.State      = LevelState.Supply;
+                                        lv.Classified = true;
+                                        UpdateActiveRayColor(lv, Brushes.Red);
+                                    }
+                                    // Igual al nivel -> Neutral, evaluará siguientes cierres 1m
                                 }
-                                else if (close1m < lv.Price)
+
+                                // 2) INVALIDACIÓN tras clasificar
+                                if (lv.Classified && !lv.Invalidated)
                                 {
-                                    lv.State      = LevelState.Supply;
-                                    lv.Classified = true;
-                                    UpdateActiveRayColor(lv, Brushes.Red);
+                                    double tol = Math.Max(0, ToleranciaTicks) * TickSize;
+
+                                    bool invalidate =
+                                        (lv.State == LevelState.Supply  && close1m >= lv.Price + tol) ||
+                                        (lv.State == LevelState.Demand  && close1m <= lv.Price - tol);
+
+                                    if (invalidate)
+                                    {
+                                        lv.Invalidated = true;
+                                        lv.State       = LevelState.Invalid;
+                                        FreezeLineAtCurrent(lv); // corta extensión
+                                    }
                                 }
-                                // Igual al nivel -> Neutral, evaluará siguientes cierres 1m
                             }
+                        }
+                    }
 
-                            // 2) INVALIDACIÓN tras clasificar
-                            if (lv.Classified && !lv.Invalidated)
+                    if (MultipleNodeModuleOn && multipleNodeTickSize > 0)
+                    {
+                        DateTime lastCloseTime  = Times[1][1];
+                        double   lastClosePrice = Closes[1][1];
+                        double   prevClose      = (CurrentBars[1] > 1) ? Closes[1][2] : lastClosePrice;
+
+                        foreach (var lvl in multipleNodeActiveLevels.Where(x => x.Active && x.State == NodeState.Pending && lastCloseTime >= x.NextMinuteCloseTime).ToList())
+                        {
+                            if (lastClosePrice > lvl.Price) { lvl.State = NodeState.Demand; RecolorMultipleNodeLevel(lvl, Brushes.LimeGreen); }
+                            else if (lastClosePrice < lvl.Price) { lvl.State = NodeState.Supply; RecolorMultipleNodeLevel(lvl, Brushes.Red); }
+                        }
+
+                        if (multipleNodeBorrarSoloSiCierre && multipleNodeCierreParaBorrar == NinjaTrader.NinjaScript.CloseSource.OneMinute)
+                        {
+                            double tol = Math.Max(0, MultipleNodeToleranciaTicks) * multipleNodeTickSize;
+
+                            foreach (var lvl in multipleNodeActiveLevels.Where(x => x.Active).ToList())
                             {
-                                double tol = Math.Max(0, ToleranciaTicks) * TickSize;
-
-                                bool invalidate =
-                                    (lv.State == LevelState.Supply  && close1m >= lv.Price + tol) ||
-                                    (lv.State == LevelState.Demand  && close1m <= lv.Price - tol);
-
-                                if (invalidate)
+                                if (lvl.State == NodeState.Pending)
                                 {
-                                    lv.Invalidated = true;
-                                    lv.State       = LevelState.Invalid;
-                                    FreezeLineAtCurrent(lv); // corta extensión
+                                    if (CloseTouchesOrCrossesMultipleNode(lastClosePrice, prevClose, lvl.Price))
+                                        InvalidateMultipleNodeLevel(lvl, Times[1][1]);
+                                    continue;
                                 }
+
+                                bool broken = false;
+                                if (lvl.State == NodeState.Demand)
+                                    broken = (lastClosePrice < lvl.Price - tol);
+                                else if (lvl.State == NodeState.Supply)
+                                    broken = (lastClosePrice > lvl.Price + tol);
+
+                                if (broken)
+                                    InvalidateMultipleNodeLevel(lvl, Times[1][1]);
                             }
                         }
                     }
@@ -544,7 +659,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             if (volBip >= 0 && BarsInProgress == volBip)
             {
-                if (!ImbalanceModuleOn && !VolumeClusterModuleOn)
+                if (!ImbalanceModuleOn && !VolumeClusterModuleOn && !MultipleNodeModuleOn)
                     return;
 
                 if (volBarsType == null || CurrentBars[volBip] < 0 || volTickSize <= 0)
@@ -594,6 +709,9 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 if (VolumeClusterModuleOn)
                     VnDetectCluster(volBarIndex, volBarTime, low, high);
+
+                if (MultipleNodeModuleOn)
+                    MultipleNodeDetect(volBarIndex, volBarTime);
 
                 return;
             }
@@ -923,6 +1041,159 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             try { RemoveDrawObject(tag); } catch { /* ignore */ }
         }
+
+        #region MultipleNode (X) helpers
+        private void MultipleNodeDetect(int volBarIndex, DateTime volBarTime)
+        {
+            if (volBarsType == null || volBarIndex < 0 || multipleNodeTickSize <= 0)
+                return;
+
+            int barrasVentana = Math.Max(1, MultipleNodeVentanaMin / Math.Max(1, GlobalTimeFrameMinutes));
+            int disponibles   = Math.Min(barrasVentana, volBarIndex + 1);
+
+            var pocs = new List<double>(disponibles);
+            for (int i = 0; i < disponibles; i++)
+            {
+                int absIndex = volBarIndex - i;
+                if (absIndex < 0) break;
+
+                double pocPrice;
+                volBarsType.Volumes[absIndex].GetMaximumVolume(null, out pocPrice);
+                if (!double.IsNaN(pocPrice) && pocPrice > 0)
+                    pocs.Add(Instrument.MasterInstrument.RoundToTickSize(pocPrice));
+            }
+
+            var clusters = GetMultipleNodeClusterLevels(pocs);
+            foreach (double levelPrice in clusters)
+            {
+                if (!HasActiveMultipleNodeLevelNear(levelPrice))
+                    CreateMultipleNodeLevel(levelPrice, volBarTime);
+            }
+        }
+
+        private List<double> GetMultipleNodeClusterLevels(List<double> pocs)
+        {
+            var result = new List<double>();
+            if (pocs == null || pocs.Count < 2)
+                return result;
+
+            pocs.Sort();
+            double tol = MultipleNodeTicksAlrededor * multipleNodeTickSize;
+
+            List<double> cluster = new List<double> { pocs[0] };
+            double        clusterStart = pocs[0];
+
+            for (int i = 1; i < pocs.Count; i++)
+            {
+                double p = pocs[i];
+                if (p - clusterStart <= tol)
+                    cluster.Add(p);
+                else
+                {
+                    if (cluster.Count >= 2)
+                        result.Add(ClusterMultipleNodePrice(cluster));
+                    cluster.Clear();
+                    cluster.Add(p);
+                    clusterStart = p;
+                }
+            }
+
+            if (cluster.Count >= 2)
+                result.Add(ClusterMultipleNodePrice(cluster));
+
+            return result;
+        }
+
+        private double ClusterMultipleNodePrice(List<double> cluster)
+        {
+            if (cluster == null || cluster.Count == 0)
+                return 0;
+
+            return multipleNodeModoPrecio == NinjaTrader.NinjaScript.LinePriceMode.Average
+                ? Instrument.MasterInstrument.RoundToTickSize(cluster.Average())
+                : Instrument.MasterInstrument.RoundToTickSize(0.5 * (cluster.First() + cluster.Last()));
+        }
+
+        private bool HasActiveMultipleNodeLevelNear(double price)
+        {
+            foreach (var lvl in multipleNodeActiveLevels)
+                if (lvl.Active && Math.Abs(lvl.Price - price) <= MultipleNodeDedupTolerance)
+                    return true;
+            return false;
+        }
+
+        private void CreateMultipleNodeLevel(double price, DateTime startTime)
+        {
+            var lvl = new Level
+            {
+                Price               = Instrument.MasterInstrument.RoundToTickSize(price),
+                StartTime           = startTime,
+                NextMinuteCloseTime = startTime.AddMinutes(1),
+                State               = NodeState.Pending,
+                Active              = true,
+                Tag                 = $"{multipleNodeTagPrefix}_{++multipleNodeUniqueId}_{(long)Math.Round(price / multipleNodeTickSize)}"
+            };
+
+            multipleNodeActiveLevels.Add(lvl);
+            DrawMultipleNodeLevel(lvl, Brushes.Gold);
+        }
+
+        private void DrawMultipleNodeLevel(Level lvl, Brush brush)
+        {
+            Draw.Ray(this, lvl.Tag, lvl.StartTime, lvl.Price, lvl.StartTime.AddMinutes(1), lvl.Price, brush, DashStyleHelper.Solid, 2);
+
+            Draw.Text(this, lvl.Tag + "_label", false, "multiple node",
+                      lvl.StartTime, lvl.Price + 2 * multipleNodeTickSize, 0,
+                      brush, multipleNodeLabelFont, TextAlignment.Left,
+                      Brushes.Transparent, Brushes.Transparent, 0);
+        }
+
+        private void RecolorMultipleNodeLevel(Level lvl, Brush brush)
+        {
+            DrawMultipleNodeLevel(lvl, brush);
+        }
+
+        private void InvalidateMultipleNodeLevel(Level lvl, DateTime endTime)
+        {
+            RemoveDrawObjectSafe(lvl.Tag);
+            RemoveDrawObjectSafe(lvl.Tag + "_label");
+
+            Brush brush = Brushes.Gold;
+            if (lvl.State == NodeState.Demand)
+                brush = Brushes.LimeGreen;
+            else if (lvl.State == NodeState.Supply)
+                brush = Brushes.Red;
+
+            Draw.Line(this, lvl.Tag + "_hist", false, lvl.StartTime, lvl.Price, endTime, lvl.Price, brush, DashStyleHelper.Solid, 2);
+
+            Draw.Text(this, lvl.Tag + "_hist_label", false, "multiple node",
+                      lvl.StartTime, lvl.Price + 2 * multipleNodeTickSize, 0,
+                      brush, multipleNodeLabelFont, TextAlignment.Left,
+                      Brushes.Transparent, Brushes.Transparent, 0);
+
+            lvl.InvalidationTime = endTime;
+            lvl.Active           = false;
+        }
+
+        private void DeleteMultipleNodeLevel(Level lvl)
+        {
+            RemoveDrawObjectSafe(lvl.Tag);
+            RemoveDrawObjectSafe(lvl.Tag + "_label");
+            RemoveDrawObjectSafe(lvl.Tag + "_hist");
+            RemoveDrawObjectSafe(lvl.Tag + "_hist_label");
+            lvl.Active = false;
+        }
+
+        private bool CloseTouchesOrCrossesMultipleNode(double lastClose, double prevClose, double levelPrice)
+        {
+            if (Math.Abs(lastClose - levelPrice) <= MultipleNodeCloseTouchEps)
+                return true;
+
+            bool crossDown = lastClose < levelPrice && prevClose > levelPrice;
+            bool crossUp   = lastClose > levelPrice && prevClose < levelPrice;
+            return crossDown || crossUp;
+        }
+        #endregion
 
         #endregion
 
