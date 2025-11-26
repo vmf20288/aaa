@@ -18,10 +18,17 @@
 //     queda siempre visible (rojo BID / verde ASK).
 //   - **Anti‑dup (v6):** si en ≤ 300 ms y a ±1 tick aparece otro nivel del mismo lado,
 //     se suma su volumen al nivel existente y NO se crea otra línea (la etiqueta se actualiza).
+//   - Módulo Imbalance (IM):
+//       * Detecta y dibuja stacks diagonales de imbalances en Volumetric (Order Flow+),
+//         reutilizando la lógica del indicador a2imbalance.
+//       * Es independiente del módulo MinTrade y usa el time frame global (en minutos).
+//       * Se puede activar/desactivar con la propiedad Global Imbalance (IM) (ON/OFF).
 //   - Módulo Global:
 //       * MinTrade (ON/OFF): activa/desactiva completamente el módulo MinTrade (detección y dibujo).
+//       * Imbalance (IM) (ON/OFF): interruptor maestro del módulo Imbalance.
 //       * Reset session (ON/OFF): controla si se limpian niveles y estado al inicio de cada nueva sesión
 //         (ON = igual que ahora, OFF = conserva niveles históricos en el gráfico).
+//       * Time frame (min): marco temporal global que usan los módulos basados en velas (IM por ahora).
 //
 // Parámetros expuestos (solo los acordados):
 //   - MinTrade (int)                 -> umbral de volumen del clúster para generar el nivel.
@@ -58,6 +65,7 @@ using NinjaTrader.Data;
 using NinjaTrader.Gui;              // DashStyleHelper
 using NinjaTrader.Gui.Tools;        // SimpleFont
 using NinjaTrader.NinjaScript;
+using NinjaTrader.NinjaScript.BarsTypes;
 using NinjaTrader.NinjaScript.DrawingTools;
 #endregion
 
@@ -120,14 +128,43 @@ namespace NinjaTrader.NinjaScript.Indicators
         private double       driftPriceTol = 0.0;           // tolerancia de precio del clúster
         private int          clusterStartMinuteIndex = 0;   // barra 1m donde arrancó el clúster
 
+        // --- Imbalance (IM) ---
+        private int                   volBip            = -1;
+        private VolumetricBarsType    volBarsType       = null;
+        private double                volTickSize       = 0;
+        private readonly Dictionary<string, StackLine> activeLines = new Dictionary<string, StackLine>();
+
+        // v6: radio fijo de proximidad para dedupe por lado (en ticks)
+        private const int ProximityTicksFixed = 10;
+
+        private class StackLine
+        {
+            public string TagRay { get; set; }
+            public string TagText { get; set; }
+            public double Price { get; set; } // precio medio actual del stack (para invalidación)
+            public bool IsAskStack { get; set; } // true = ASK (soporte, verde); false = BID (resistencia, roja)
+            public DateTime BarTime { get; set; } // tiempo de la barra volumétrica donde se originó
+            public double RunStartPrice { get; set; } // precio de inicio del stack (para reusar tag intrabar)
+            public int OriginPrimaryIndex { get; set; } // índice de la barra primaria donde se creó
+        }
+
         // ----------------- Propiedades expuestas -----------------
         [NinjaScriptProperty]
         [Display(Name = "MinTrade (ON/OFF)", Order = 0, GroupName = "Global")]
         public bool MinTradeModuleOn { get; set; }
 
         [NinjaScriptProperty]
-        [Display(Name = "Reset session (ON/OFF)", Order = 1, GroupName = "Global")]
+        [Display(Name = "Imbalance (IM) (ON/OFF)", Order = 1, GroupName = "Global")]
+        public bool ImbalanceModuleOn { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Reset session (ON/OFF)", Order = 2, GroupName = "Global")]
         public bool ResetSessionOnNewSession { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "Time frame (min)", Order = 3, GroupName = "Global")]
+        public int GlobalTimeFrameMinutes { get; set; }
 
         [NinjaScriptProperty]
         [Range(1, int.MaxValue)]
@@ -166,6 +203,30 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Range(1, int.MaxValue)]
         [Display(Name = "MinPrint (vol)", Order = 7, GroupName = "MinTrade")]
         public int MinPrintVol { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Stack imbalance", GroupName = "Imbalance (IM)", Order = 2)]
+        [Range(1, 50)]
+        public int StackImbalance { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Imbalance ratio (e.g. 3.0 = 300%)", GroupName = "Imbalance (IM)", Order = 3)]
+        [Range(1.0, double.MaxValue)]
+        public double ImbalanceRatio { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Min delta para imbalance", GroupName = "Imbalance (IM)", Order = 4)]
+        [Range(0, int.MaxValue)]
+        public int MinDeltaImbalance { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Tolerancia borrar (ticks)", GroupName = "Imbalance (IM)", Order = 5)]
+        [Range(0, 1000)]
+        public int ToleranciaBorrarTicks { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Filtro de supervivencia", GroupName = "Imbalance (IM)", Order = 6)]
+        public bool FiltroSupervivencia { get; set; }
 
         // Salidas públicas (último evento)
         [Browsable(false), XmlIgnore] public Series<double> LastMinTradeVolume => volumeSeries;
@@ -219,6 +280,20 @@ namespace NinjaTrader.NinjaScript.Indicators
             LastDetectedMinTradeSide   = MinTradeSide.Unknown;
             LastDetectedMinTradeTime   = DateTime.MinValue;
 
+            ClearAllStackLines();
+
+            if (volBip >= 0 && volBip < BarsArray.Length)
+            {
+                volBarsType = BarsArray[volBip].BarsType as VolumetricBarsType;
+                if (volBarsType != null)
+                    volTickSize = BarsArray[volBip].Instrument.MasterInstrument.TickSize;
+            }
+            else
+            {
+                volBarsType = null;
+                volTickSize = 0;
+            }
+
             if (volumeSeries != null)
                 volumeSeries[0] = double.NaN;
             if (priceSeries != null)
@@ -239,16 +314,23 @@ namespace NinjaTrader.NinjaScript.Indicators
                 PaintPriceMarkers        = false;
                 IsSuspendedWhileInactive = false;
 
-                MinTradeModuleOn       = true;
+                MinTradeModuleOn        = true;
+                ImbalanceModuleOn       = true;
                 ResetSessionOnNewSession = true;
-                MinTrade               = 25;
-                ToleranciaTicks        = 8;
-                ClusterWindowMs        = 300;
-                DriftTicks             = 2;
-                UseAlMenos             = true;
-                AlMenosMinTrade        = 10;
-                UseMinPrint            = true;
-                MinPrintVol            = 2;
+                GlobalTimeFrameMinutes  = 5;
+                MinTrade                = 25;
+                ToleranciaTicks         = 8;
+                ClusterWindowMs         = 300;
+                DriftTicks              = 2;
+                UseAlMenos              = true;
+                AlMenosMinTrade         = 10;
+                UseMinPrint             = true;
+                MinPrintVol             = 2;
+                StackImbalance          = 3;
+                ImbalanceRatio          = 3.0;
+                MinDeltaImbalance       = 0;
+                ToleranciaBorrarTicks   = 6;
+                FiltroSupervivencia     = false;
 
                 AddPlot(Brushes.Transparent, "LastMinTradeVolume");
                 AddPlot(Brushes.Transparent, "LastMinTradePrice");
@@ -259,11 +341,23 @@ namespace NinjaTrader.NinjaScript.Indicators
                 AddDataSeries(BarsPeriodType.Minute, 1);
                 // Serie 2: 1 tick (detección y clúster)
                 AddDataSeries(BarsPeriodType.Tick, 1);
+                // Serie Volumetric para Imbalance (IM)
+                AddVolumetric(Instrument.FullName, BarsPeriodType.Minute, GlobalTimeFrameMinutes, VolumetricDeltaType.BidAsk, 1);
+                volBip = BarsArray.Length - 1;
             }
             else if (State == State.DataLoaded)
             {
                 volumeSeries = Values[0];
                 priceSeries  = Values[1];
+
+                if (volBip >= 0 && volBip < BarsArray.Length)
+                {
+                    volBarsType = BarsArray[volBip].BarsType as VolumetricBarsType;
+                    if (volBarsType != null)
+                        volTickSize = BarsArray[volBip].Instrument.MasterInstrument.TickSize;
+                    else
+                        volTickSize = 0;
+                }
             }
         }
         #endregion
@@ -293,6 +387,14 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 if (ResetSessionOnNewSession && Bars.IsFirstBarOfSession && IsFirstTickOfBar)
                     ResetForNewSession();
+
+                if (ImbalanceModuleOn)
+                {
+                    EnsureSurvivalCutoffTime();
+
+                    if (activeLines.Count > 0)
+                        CheckInvalidations();
+                }
 
                 volumeSeries[0] = double.NaN;
                 priceSeries[0]  = double.NaN;
@@ -355,6 +457,55 @@ namespace NinjaTrader.NinjaScript.Indicators
                     }
                 }
 
+                return;
+            }
+
+            if (volBip >= 0 && BarsInProgress == volBip)
+            {
+                if (!ImbalanceModuleOn)
+                    return;
+
+                if (volBarsType == null || CurrentBars[volBip] < 0 || volTickSize <= 0)
+                    return;
+
+                bool isHistorical   = State == State.Historical;
+                bool isRealtimeLike = State == State.Realtime || State == State.Transition;
+
+                int      volBarIndex;
+                DateTime volBarTime;
+                double   low, high;
+
+                if (isHistorical)
+                {
+                    if (!IsFirstTickOfBar || CurrentBars[volBip] < 1)
+                        return;
+
+                    volBarIndex = CurrentBars[volBip] - 1;
+                    volBarTime  = Times[volBip][1];
+                    low         = Lows[volBip][1];
+                    high        = Highs[volBip][1];
+                }
+                else if (isRealtimeLike)
+                {
+                    volBarIndex = CurrentBars[volBip];
+                    volBarTime  = Times[volBip][0];
+                    low         = Lows[volBip][0];
+                    high        = Highs[volBip][0];
+                }
+                else
+                {
+                    return;
+                }
+
+                if (high < low)
+                {
+                    double t = high;
+                    high = low;
+                    low  = t;
+                }
+
+                DetectAndDrawStacks(volBarIndex, volBarTime, low, high, true);
+                DetectAndDrawStacks(volBarIndex, volBarTime, low, high, false);
                 return;
             }
 
@@ -682,6 +833,267 @@ namespace NinjaTrader.NinjaScript.Indicators
         private void RemoveDrawObjectSafe(string tag)
         {
             try { RemoveDrawObject(tag); } catch { /* ignore */ }
+        }
+
+        #endregion
+
+        #region Imbalance (IM) module
+        private void DetectAndDrawStacks(int volBarIndex, DateTime volBarTime, double low, double high, bool checkAskSide)
+        {
+            int runCount = 0;
+            double runStartPrice = double.NaN;
+            double step = volTickSize;
+
+            // v5: límites para asegurar existencia de la diagonal vecina
+            double start = checkAskSide ? (low + step) : low; // BUY (ASK) arranca en low+step
+            double end = checkAskSide ? high : (high - step); // SELL (BID) termina en high-step
+            if (end < start - 1e-10)
+                return;
+
+            for (double p = start; p <= end + 1e-10; p += step)
+            {
+                long dominant, opposite;
+                if (checkAskSide)
+                {
+                    dominant = volBarsType.Volumes[volBarIndex].GetAskVolumeForPrice(p);
+                    opposite = volBarsType.Volumes[volBarIndex].GetBidVolumeForPrice(p - step);
+                }
+                else
+                {
+                    dominant = volBarsType.Volumes[volBarIndex].GetBidVolumeForPrice(p);
+                    opposite = volBarsType.Volumes[volBarIndex].GetAskVolumeForPrice(p + step);
+                }
+
+                bool isImb = IsDiagonalImbalanceSafe(dominant, opposite);
+                if (isImb)
+                {
+                    if (runCount == 0)
+                        runStartPrice = p;
+                    runCount++;
+                }
+                else
+                {
+                    if (runCount >= StackImbalance && !double.IsNaN(runStartPrice))
+                        CreateOrUpdateStackLine(volBarTime, runStartPrice, runCount, checkAskSide);
+                    runCount = 0;
+                    runStartPrice = double.NaN;
+                }
+            }
+
+            if (runCount >= StackImbalance && !double.IsNaN(runStartPrice))
+                CreateOrUpdateStackLine(volBarTime, runStartPrice, runCount, checkAskSide);
+        }
+
+        private bool IsDiagonalImbalanceSafe(long dominant, long opposite)
+        {
+            if (dominant <= 0)
+                return false;
+
+            if (opposite <= 0)
+                return dominant >= MinDeltaImbalance;
+
+            bool ratioOk = (double)dominant >= ImbalanceRatio * (double)opposite;
+            bool deltaOk = Math.Abs(dominant - opposite) >= MinDeltaImbalance;
+            return ratioOk && deltaOk;
+        }
+
+        private int BarsAgoOnPrimary(DateTime anchorTime)
+        {
+            int idxOnPrimary = BarsArray[0].GetBar(anchorTime);
+            if (idxOnPrimary < 0)
+                return CurrentBars[0]; // si no existe, anclar en el extremo izquierdo visible
+
+            int barsAgo = CurrentBars[0] - idxOnPrimary;
+            if (barsAgo < 0)
+                barsAgo = 0; // por seguridad si el primario va "adelantado"
+            return barsAgo;
+        }
+
+        private int GetPrimaryIndex(DateTime barTime)
+        {
+            int idxOnPrimary = BarsArray[0].GetBar(barTime);
+            if (idxOnPrimary < 0)
+            {
+                if (CurrentBars[0] >= 0)
+                    idxOnPrimary = CurrentBars[0];
+                else
+                    idxOnPrimary = -1;
+            }
+
+            return idxOnPrimary;
+        }
+
+        private void CreateOrUpdateStackLine(DateTime barTime, double runStartPrice, int runCount, bool isAskSide)
+        {
+            if (CurrentBars[0] < 1)
+                return;
+
+            double midPrice = runStartPrice + ((runCount - 1) * 0.5) * volTickSize;
+
+            double proxTol = ProximityTicksFixed * TickSize;
+            if (activeLines.Count > 0)
+            {
+                var toRemoveProx = new List<string>();
+                foreach (var kvp in activeLines)
+                {
+                    var info = kvp.Value;
+                    if (info.IsAskStack == isAskSide && Math.Abs(info.Price - midPrice) <= proxTol)
+                        toRemoveProx.Add(kvp.Key);
+                }
+
+                foreach (var oldTag in toRemoveProx)
+                    RemoveStackLine(oldTag);
+            }
+
+            string side = isAskSide ? "ASK" : "BID";
+
+            string tagRay = $"a2imbalance_v6_{side}_{barTime:yyyyMMddHHmmss}_{Instrument.FullName}_{runStartPrice.ToString("0.########")}";
+            string tagText = $"{tagRay}_text";
+
+            double tolStart = volTickSize * 0.25;
+            var toRemoveSameStack = new List<string>();
+            foreach (var kvp in activeLines)
+            {
+                var info = kvp.Value;
+                if (info.IsAskStack == isAskSide && info.BarTime == barTime && Math.Abs(info.RunStartPrice - runStartPrice) <= tolStart && kvp.Key != tagRay)
+                    toRemoveSameStack.Add(kvp.Key);
+            }
+
+            foreach (var oldTag in toRemoveSameStack)
+                RemoveStackLine(oldTag);
+
+            int startBarsAgo = BarsAgoOnPrimary(barTime);
+            int endBarsAgo = 0; // extender hacia la derecha
+
+            if (startBarsAgo <= endBarsAgo)
+            {
+                if (CurrentBars[0] >= 1)
+                    startBarsAgo = 1;
+                else
+                    return;
+            }
+
+            Brush brush = isAskSide ? Brushes.LimeGreen : Brushes.Red;
+
+            var ray = Draw.Ray(this, tagRay, startBarsAgo, midPrice, endBarsAgo, midPrice, brush);
+            if (ray != null && ray.Stroke != null)
+                ray.Stroke.Width = 2;
+
+            Draw.Text(this, tagText, "Stack Imbalance", startBarsAgo, midPrice, brush);
+
+            if (!activeLines.TryGetValue(tagRay, out var infoNew))
+            {
+                infoNew = new StackLine
+                {
+                    TagRay = tagRay,
+                    TagText = tagText,
+                    Price = midPrice,
+                    IsAskStack = isAskSide,
+                    BarTime = barTime,
+                    RunStartPrice = runStartPrice,
+                    OriginPrimaryIndex = GetPrimaryIndex(barTime)
+                };
+                activeLines[tagRay] = infoNew;
+            }
+            else
+            {
+                infoNew.Price = midPrice;
+            }
+        }
+
+        private void CheckInvalidations()
+        {
+            if (activeLines.Count == 0)
+                return;
+
+            bool useVolForInvalidation = volTickSize > 0 && volBip >= 0 && CurrentBars.Length > volBip && CurrentBars[volBip] >= 0;
+            double tickSize = useVolForInvalidation ? volTickSize : TickSize;
+            double tol = ToleranciaBorrarTicks * tickSize;
+
+            double currentHigh = useVolForInvalidation ? Highs[volBip][0] : High[0];
+            double currentLow = useVolForInvalidation ? Lows[volBip][0] : Low[0];
+
+            var toFinalize = new List<string>();
+            foreach (var kvp in activeLines)
+            {
+                var info = kvp.Value;
+                if (info.IsAskStack)
+                {
+                    if (currentLow <= info.Price - tol)
+                        toFinalize.Add(kvp.Key);
+                }
+                else
+                {
+                    if (currentHigh >= info.Price + tol)
+                        toFinalize.Add(kvp.Key);
+                }
+            }
+
+            foreach (var tag in toFinalize)
+                FinalizeStackLine(tag);
+        }
+
+        private void FinalizeStackLine(string tagRay)
+        {
+            if (!activeLines.TryGetValue(tagRay, out var info))
+                return;
+
+            int originIndex = info.OriginPrimaryIndex;
+            if (originIndex < 0)
+                originIndex = GetPrimaryIndex(info.BarTime);
+
+            int barsPassed = Math.Max(0, CurrentBars[0] - originIndex);
+            if (FiltroSupervivencia && barsPassed <= 1)
+            {
+                RemoveStackLine(tagRay);
+                return;
+            }
+
+            int startBarsAgo = BarsAgoOnPrimary(info.BarTime);
+            int endBarsAgo = 0;
+
+            if (startBarsAgo <= endBarsAgo && CurrentBars[0] >= 1)
+                startBarsAgo = 1;
+
+            Brush brush = info.IsAskStack ? Brushes.LimeGreen : Brushes.Red;
+
+            RemoveDrawObjectSafe(info.TagRay);
+            string finalTag = $"{info.TagRay}_final";
+            var line = Draw.Line(this, finalTag, startBarsAgo, info.Price, endBarsAgo, info.Price, brush);
+            if (line != null && line.Stroke != null)
+                line.Stroke.Width = 2;
+
+            RemoveDrawObjectSafe(info.TagText);
+            activeLines.Remove(tagRay);
+        }
+
+        private void ClearAllStackLines()
+        {
+            if (activeLines.Count == 0)
+                return;
+
+            foreach (var kvp in activeLines)
+            {
+                RemoveDrawObjectSafe(kvp.Value.TagRay);
+                RemoveDrawObjectSafe(kvp.Value.TagText);
+            }
+
+            activeLines.Clear();
+        }
+
+        private void RemoveStackLine(string tagRay)
+        {
+            if (!activeLines.TryGetValue(tagRay, out var info))
+                return;
+
+            RemoveDrawObjectSafe(info.TagRay);
+            RemoveDrawObjectSafe(info.TagText);
+            activeLines.Remove(tagRay);
+        }
+
+        private void EnsureSurvivalCutoffTime()
+        {
+            // No-op
         }
         #endregion
     }
