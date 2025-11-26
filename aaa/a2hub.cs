@@ -23,12 +23,19 @@
 //         reutilizando la lógica del indicador a2imbalance.
 //       * Es independiente del módulo MinTrade y usa el time frame global (en minutos).
 //       * Se puede activar/desactivar con la propiedad Global Imbalance (IM) (ON/OFF).
+//   - Módulo VolumeCluster (VN):
+//       * Detecta clusters de volumen en Volumetric (Order Flow+) dentro de una ventana de ticks
+//         y exige un porcentaje concentrado; toma como nivel el precio con mayor volumen (POC local).
+//       * Activación inmediata o tras X velas de 1m; invalida por cruce con margen de ticks.
+//       * Dibuja rayos horizontales "VolCluster" y expone NivelExpuesto / UltimoNivelActual.
+//       * Es independiente de MinTrade e Imbalance y usa el time frame global.
 //   - Módulo Global:
 //       * MinTrade (ON/OFF): activa/desactiva completamente el módulo MinTrade (detección y dibujo).
 //       * Imbalance (IM) (ON/OFF): interruptor maestro del módulo Imbalance.
+//       * VolumeCluster (VN) (ON/OFF): interruptor maestro del módulo VolumeCluster.
 //       * Reset session (ON/OFF): controla si se limpian niveles y estado al inicio de cada nueva sesión
 //         (ON = igual que ahora, OFF = conserva niveles históricos en el gráfico).
-//       * Time frame (min): marco temporal global que usan los módulos basados en velas (IM por ahora).
+//       * Time frame (min): marco temporal global que usan los módulos basados en velas/Volumetric (IM y VN).
 //
 // Parámetros expuestos (solo los acordados):
 //   - MinTrade (int)                 -> umbral de volumen del clúster para generar el nivel.
@@ -56,6 +63,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
+using System.Reflection;
 using System.Xml.Serialization;
 using System.Windows.Media;
 
@@ -128,14 +136,43 @@ namespace NinjaTrader.NinjaScript.Indicators
         private double       driftPriceTol = 0.0;           // tolerancia de precio del clúster
         private int          clusterStartMinuteIndex = 0;   // barra 1m donde arrancó el clúster
 
-        // --- Imbalance (IM) ---
-        private int                   volBip            = -1;
+        // --- Volumetric shared + Imbalance (IM) ---
+        private int                   volBip            = -1; // serie Volumetric compartida (IM/VN)
         private VolumetricBarsType    volBarsType       = null;
         private double                volTickSize       = 0;
         private readonly Dictionary<string, StackLine> activeLines = new Dictionary<string, StackLine>();
 
         // v6: radio fijo de proximidad para dedupe por lado (en ticks)
         private const int ProximityTicksFixed = 10;
+
+        // --- VolumeCluster (VN) ---
+        private class ClusterZone
+        {
+            public DateTime FormationTime;  // cierre de la barra volumétrica con cluster
+            public double   Level;          // precio con mayor volumen dentro del rango
+            public double   RangeHigh;      // límite superior del rango
+            public double   RangeLow;       // límite inferior del rango
+            public long     ClusterVolume;  // suma de volumen del rango
+            public long     BarTotalVolume; // volumen total de la barra
+            public bool     Active;         // ya activada
+            public bool     IsSupport;      // true soporte, false resistencia
+            public string   Tag;            // tag de dibujo
+            public int      M1ClosesSeen;   // cierres 1m contados desde formación
+            public DateTime ActivationTime; // tiempo de activación
+            public DateTime InvalidationTime; // tiempo de invalidación por precio
+        }
+
+        private readonly List<ClusterZone> vnPending    = new List<ClusterZone>();
+        private readonly List<ClusterZone> vnActive     = new List<ClusterZone>();
+        private readonly List<ClusterZone> vnDrawQueue  = new List<ClusterZone>();
+        private readonly List<ClusterZone> vnHistorical = new List<ClusterZone>();
+
+        private readonly Brush vnSoporteBrush     = Brushes.LimeGreen;
+        private readonly Brush vnResistenciaBrush = Brushes.Red;
+        private const int      vnGrosorLineaFijo  = 2;
+
+        private Series<double> vnNivelExpuesto;
+        private double         vnUltimoNivelActual = double.NaN;
 
         private class StackLine
         {
@@ -154,16 +191,20 @@ namespace NinjaTrader.NinjaScript.Indicators
         public bool MinTradeModuleOn { get; set; }
 
         [NinjaScriptProperty]
-        [Display(Name = "Imbalance (IM) (ON/OFF)", Order = 1, GroupName = "Global")]
-        public bool ImbalanceModuleOn { get; set; }
-
-        [NinjaScriptProperty]
-        [Display(Name = "Reset session (ON/OFF)", Order = 2, GroupName = "Global")]
+        [Display(Name = "Reset session (ON/OFF)", Order = 1, GroupName = "Global")]
         public bool ResetSessionOnNewSession { get; set; }
 
         [NinjaScriptProperty]
+        [Display(Name = "Imbalance (IM) (ON/OFF)", Order = 2, GroupName = "Global")]
+        public bool ImbalanceModuleOn { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "VolumeCluster (VN) (ON/OFF)", Order = 3, GroupName = "Global")]
+        public bool VolumeClusterModuleOn { get; set; }
+
+        [NinjaScriptProperty]
         [Range(1, int.MaxValue)]
-        [Display(Name = "Time frame (min)", Order = 3, GroupName = "Global")]
+        [Display(Name = "Time frame (min)", Order = 4, GroupName = "Global")]
         public int GlobalTimeFrameMinutes { get; set; }
 
         [NinjaScriptProperty]
@@ -228,9 +269,32 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "Filtro de supervivencia", GroupName = "Imbalance (IM)", Order = 6)]
         public bool FiltroSupervivencia { get; set; }
 
+        [NinjaScriptProperty]
+        [Range(1, 100)]
+        [Display(Name = "Porcentaje concentrado (%)", GroupName = "VolumeCluster (VN)", Order = 0)]
+        public int PorcentajeConcentrado { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, 100)]
+        [Display(Name = "Ticks alrededor (ancho del rango)", GroupName = "VolumeCluster (VN)", Order = 1)]
+        public int TicksAlrededor { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0, 10)]
+        [Display(Name = "Min de velas para confirmación (1m)", GroupName = "VolumeCluster (VN)", Order = 2)]
+        public int MinVelasConfirmacion { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0, 200)]
+        [Display(Name = "Margen de ticks: borrar", GroupName = "VolumeCluster (VN)", Order = 3)]
+        public int MargenTicksBorre { get; set; }
+
         // Salidas públicas (último evento)
         [Browsable(false), XmlIgnore] public Series<double> LastMinTradeVolume => volumeSeries;
         [Browsable(false), XmlIgnore] public Series<double> LastMinTradePrice  => priceSeries;
+
+        [Browsable(false), XmlIgnore] public Series<double> NivelExpuesto => vnNivelExpuesto;
+        [Browsable(false)] public double UltimoNivelActual => vnUltimoNivelActual;
 
         [Browsable(false)] public string       Version                    => InternalVersion;
         [Browsable(false)] public MinTradeSide CurrentMinTradeSide        { get; private set; } = MinTradeSide.Unknown;
@@ -282,6 +346,8 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             ClearAllStackLines();
 
+            ResetVolumeClusterModule();
+
             if (volBip >= 0 && volBip < BarsArray.Length)
             {
                 volBarsType = BarsArray[volBip].BarsType as VolumetricBarsType;
@@ -298,6 +364,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                 volumeSeries[0] = double.NaN;
             if (priceSeries != null)
                 priceSeries[0]  = double.NaN;
+
+            if (vnNivelExpuesto != null)
+                vnNivelExpuesto[0] = double.NaN;
         }
 
         #region OnStateChange
@@ -314,10 +383,11 @@ namespace NinjaTrader.NinjaScript.Indicators
                 PaintPriceMarkers        = false;
                 IsSuspendedWhileInactive = false;
 
-                MinTradeModuleOn        = true;
-                ImbalanceModuleOn       = true;
+                MinTradeModuleOn         = true;
                 ResetSessionOnNewSession = true;
-                GlobalTimeFrameMinutes  = 5;
+                ImbalanceModuleOn        = true;
+                VolumeClusterModuleOn    = true;
+                GlobalTimeFrameMinutes   = 5;
                 MinTrade                = 25;
                 ToleranciaTicks         = 8;
                 ClusterWindowMs         = 300;
@@ -331,6 +401,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                 MinDeltaImbalance       = 0;
                 ToleranciaBorrarTicks   = 6;
                 FiltroSupervivencia     = false;
+                PorcentajeConcentrado   = 25;
+                TicksAlrededor          = 6;
+                MinVelasConfirmacion    = 0;
+                MargenTicksBorre        = 6;
 
                 AddPlot(Brushes.Transparent, "LastMinTradeVolume");
                 AddPlot(Brushes.Transparent, "LastMinTradePrice");
@@ -341,7 +415,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 AddDataSeries(BarsPeriodType.Minute, 1);
                 // Serie 2: 1 tick (detección y clúster)
                 AddDataSeries(BarsPeriodType.Tick, 1);
-                // Serie Volumetric para Imbalance (IM)
+                // Serie Volumetric compartida para Imbalance (IM) y VolumeCluster (VN)
                 AddVolumetric(Instrument.FullName, BarsPeriodType.Minute, GlobalTimeFrameMinutes, VolumetricDeltaType.BidAsk, 1);
                 volBip = BarsArray.Length - 1;
             }
@@ -358,6 +432,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                     else
                         volTickSize = 0;
                 }
+
+                vnNivelExpuesto = new Series<double>(this);
             }
         }
         #endregion
@@ -382,7 +458,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (CurrentBars[BarsInProgress] < 0)
                 return;
 
-            // Serie primaria: solo reseteamos salidas numéricas
+            // Serie primaria: solo reseteamos salidas numéricas y procesamos módulos sobre BIP 0
             if (BarsInProgress == 0)
             {
                 if (ResetSessionOnNewSession && Bars.IsFirstBarOfSession && IsFirstTickOfBar)
@@ -396,6 +472,12 @@ namespace NinjaTrader.NinjaScript.Indicators
                         CheckInvalidations();
                 }
 
+                if (vnNivelExpuesto != null)
+                    vnNivelExpuesto[0] = VolumeClusterModuleOn ? vnUltimoNivelActual : double.NaN;
+
+                if (VolumeClusterModuleOn && vnDrawQueue.Count > 0)
+                    VnProcessDrawQueue();
+
                 volumeSeries[0] = double.NaN;
                 priceSeries[0]  = double.NaN;
                 return;
@@ -404,65 +486,65 @@ namespace NinjaTrader.NinjaScript.Indicators
             // --- CIERRE 1 MINUTO: clasificar e invalidar ---
             if (BarsInProgress == 1)
             {
-                if (!MinTradeModuleOn)
-                    return;
-
-                if (!IsFirstTickOfBar || CurrentBars[1] < 1)
-                    return;
-
-                int    closedIdx = CurrentBars[1] - 1; // índice de la barra 1m que acaba de cerrar
-                double close1m   = Closes[1][1];
-
-                if (levels.Count == 0)
-                    return;
-
-                var keys = new List<string>(levels.Keys);
-                foreach (var key in keys)
+                if (MinTradeModuleOn && IsFirstTickOfBar && CurrentBars[1] >= 1)
                 {
-                    if (!levels.TryGetValue(key, out var lv)) continue;
+                    int    closedIdx = CurrentBars[1] - 1; // índice de la barra 1m que acaba de cerrar
+                    double close1m   = Closes[1][1];
 
-                    // 1) CLASIFICACIÓN: primer cierre 1m posterior al evento
-                    if (!lv.Classified && closedIdx >= lv.EventMinuteIndex)
+                    if (levels.Count > 0)
                     {
-                        if (close1m > lv.Price)
+                        var keys = new List<string>(levels.Keys);
+                        foreach (var key in keys)
                         {
-                            lv.State      = LevelState.Demand;
-                            lv.Classified = true;
-                            UpdateActiveRayColor(lv, Brushes.Green);
-                        }
-                        else if (close1m < lv.Price)
-                        {
-                            lv.State      = LevelState.Supply;
-                            lv.Classified = true;
-                            UpdateActiveRayColor(lv, Brushes.Red);
-                        }
-                        // Igual al nivel -> Neutral, evaluará siguientes cierres 1m
-                    }
+                            if (!levels.TryGetValue(key, out var lv)) continue;
 
-                    // 2) INVALIDACIÓN tras clasificar
-                    if (lv.Classified && !lv.Invalidated)
-                    {
-                        double tol = Math.Max(0, ToleranciaTicks) * TickSize;
+                            // 1) CLASIFICACIÓN: primer cierre 1m posterior al evento
+                            if (!lv.Classified && closedIdx >= lv.EventMinuteIndex)
+                            {
+                                if (close1m > lv.Price)
+                                {
+                                    lv.State      = LevelState.Demand;
+                                    lv.Classified = true;
+                                    UpdateActiveRayColor(lv, Brushes.Green);
+                                }
+                                else if (close1m < lv.Price)
+                                {
+                                    lv.State      = LevelState.Supply;
+                                    lv.Classified = true;
+                                    UpdateActiveRayColor(lv, Brushes.Red);
+                                }
+                                // Igual al nivel -> Neutral, evaluará siguientes cierres 1m
+                            }
 
-                        bool invalidate =
-                            (lv.State == LevelState.Supply  && close1m >= lv.Price + tol) ||
-                            (lv.State == LevelState.Demand  && close1m <= lv.Price - tol);
+                            // 2) INVALIDACIÓN tras clasificar
+                            if (lv.Classified && !lv.Invalidated)
+                            {
+                                double tol = Math.Max(0, ToleranciaTicks) * TickSize;
 
-                        if (invalidate)
-                        {
-                            lv.Invalidated = true;
-                            lv.State       = LevelState.Invalid;
-                            FreezeLineAtCurrent(lv); // corta extensión
+                                bool invalidate =
+                                    (lv.State == LevelState.Supply  && close1m >= lv.Price + tol) ||
+                                    (lv.State == LevelState.Demand  && close1m <= lv.Price - tol);
+
+                                if (invalidate)
+                                {
+                                    lv.Invalidated = true;
+                                    lv.State       = LevelState.Invalid;
+                                    FreezeLineAtCurrent(lv); // corta extensión
+                                }
+                            }
                         }
                     }
                 }
+
+                if (VolumeClusterModuleOn && CurrentBars[1] >= 0)
+                    VnProcessConfirmationsYVigencias();
 
                 return;
             }
 
             if (volBip >= 0 && BarsInProgress == volBip)
             {
-                if (!ImbalanceModuleOn)
+                if (!ImbalanceModuleOn && !VolumeClusterModuleOn)
                     return;
 
                 if (volBarsType == null || CurrentBars[volBip] < 0 || volTickSize <= 0)
@@ -504,8 +586,15 @@ namespace NinjaTrader.NinjaScript.Indicators
                     low  = t;
                 }
 
-                DetectAndDrawStacks(volBarIndex, volBarTime, low, high, true);
-                DetectAndDrawStacks(volBarIndex, volBarTime, low, high, false);
+                if (ImbalanceModuleOn)
+                {
+                    DetectAndDrawStacks(volBarIndex, volBarTime, low, high, true);
+                    DetectAndDrawStacks(volBarIndex, volBarTime, low, high, false);
+                }
+
+                if (VolumeClusterModuleOn)
+                    VnDetectCluster(volBarIndex, volBarTime, low, high);
+
                 return;
             }
 
@@ -1096,6 +1185,372 @@ namespace NinjaTrader.NinjaScript.Indicators
             // No-op
         }
         #endregion
+
+        #region VolumeCluster (VN) module
+        private void VnDetectCluster(int volBarIndex, DateTime volBarTime, double low, double high)
+        {
+            var volRow = volBarsType.Volumes[volBarIndex];
+
+            long barTotalVol = volRow.TotalVolume;
+            if (barTotalVol <= 0)
+                return;
+
+            double highLocal = high;
+            double lowLocal  = low;
+
+            int niveles = Math.Max(1, (int)Math.Round((highLocal - lowLocal) / TickSize)) + 1;
+            int ventana = Math.Max(1, TicksAlrededor);
+            if (niveles < ventana)
+                return;
+
+            long umbral = (long)Math.Ceiling(barTotalVol * (PorcentajeConcentrado / 100.0));
+
+            long mejorSuma   = 0;
+            int  mejorInicio = -1;
+
+            for (int start = 0; start <= niveles - ventana; start++)
+            {
+                long suma = 0;
+                for (int k = 0; k < ventana; k++)
+                {
+                    double price = Instrument.MasterInstrument.RoundToTickSize(highLocal - (start + k) * TickSize);
+                    suma += volRow.GetTotalVolumeForPrice(price);
+                }
+                if (suma > mejorSuma)
+                {
+                    mejorSuma   = suma;
+                    mejorInicio = start;
+                }
+            }
+
+            if (mejorInicio < 0 || mejorSuma < umbral)
+                return;
+
+            double rangoHigh = Instrument.MasterInstrument.RoundToTickSize(highLocal - mejorInicio * TickSize);
+            double rangoLow  = Instrument.MasterInstrument.RoundToTickSize(rangoHigh - (ventana - 1) * TickSize);
+
+            long   maxV  = -1;
+            double nivel = (rangoHigh + rangoLow) * 0.5;
+            for (int k = 0; k < ventana; k++)
+            {
+                double p = Instrument.MasterInstrument.RoundToTickSize(rangoHigh - k * TickSize);
+                long v   = volRow.GetTotalVolumeForPrice(p);
+                if (v > maxV)
+                {
+                    maxV  = v;
+                    nivel = p;
+                }
+            }
+            nivel = Instrument.MasterInstrument.RoundToTickSize(nivel);
+
+            var cz = new ClusterZone
+            {
+                FormationTime    = volBarTime,
+                Level            = nivel,
+                RangeHigh        = rangoHigh,
+                RangeLow         = rangoLow,
+                ClusterVolume    = mejorSuma,
+                BarTotalVolume   = barTotalVol,
+                Active           = false,
+                IsSupport        = false,
+                Tag              = $"a2vc_{volBarTime:yyyyMMdd_HHmmss}_{Math.Round(nivel / TickSize)}",
+                M1ClosesSeen     = 0,
+                ActivationTime   = DateTime.MinValue,
+                InvalidationTime = DateTime.MinValue
+            };
+
+            if (MinVelasConfirmacion == 0)
+            {
+                double volClose = Closes[volBip][0];
+                if (volClose > cz.Level)
+                {
+                    cz.IsSupport      = true;
+                    cz.Active         = true;
+                    cz.ActivationTime = cz.FormationTime;
+                    vnActive.Add(cz);
+                    vnDrawQueue.Add(cz);
+                    vnUltimoNivelActual = cz.Level;
+                }
+                else if (volClose < cz.Level)
+                {
+                    cz.IsSupport      = false;
+                    cz.Active         = true;
+                    cz.ActivationTime = cz.FormationTime;
+                    vnActive.Add(cz);
+                    vnDrawQueue.Add(cz);
+                    vnUltimoNivelActual = cz.Level;
+                }
+            }
+            else
+            {
+                vnPending.Add(cz);
+            }
+        }
+
+        private void VnProcessConfirmationsYVigencias()
+        {
+            DateTime m1CloseTime = Times[1][0];
+            double   m1Close     = Closes[1][0];
+            double   m1High      = Highs[1][0];
+            double   m1Low       = Lows[1][0];
+
+            if (MinVelasConfirmacion > 0)
+            {
+                for (int i = vnPending.Count - 1; i >= 0; i--)
+                {
+                    var cz = vnPending[i];
+
+                    if (m1CloseTime <= cz.FormationTime)
+                        continue;
+
+                    cz.M1ClosesSeen++;
+
+                    if (cz.M1ClosesSeen >= MinVelasConfirmacion)
+                    {
+                        if (m1Close > cz.Level)
+                        {
+                            cz.IsSupport      = true;
+                            cz.Active         = true;
+                            cz.ActivationTime = m1CloseTime;
+                            vnActive.Add(cz);
+                            vnDrawQueue.Add(cz);
+                            vnUltimoNivelActual = cz.Level;
+                        }
+                        else if (m1Close < cz.Level)
+                        {
+                            cz.IsSupport      = false;
+                            cz.Active         = true;
+                            cz.ActivationTime = m1CloseTime;
+                            vnActive.Add(cz);
+                            vnDrawQueue.Add(cz);
+                            vnUltimoNivelActual = cz.Level;
+                        }
+                        vnPending.RemoveAt(i);
+                    }
+                }
+            }
+
+            for (int i = vnActive.Count - 1; i >= 0; i--)
+            {
+                var cz = vnActive[i];
+
+                double invalidateBelow = Instrument.MasterInstrument.RoundToTickSize(cz.Level - MargenTicksBorre * TickSize);
+                double invalidateAbove = Instrument.MasterInstrument.RoundToTickSize(cz.Level + MargenTicksBorre * TickSize);
+
+                bool invalidaSoporte     = cz.IsSupport  && m1Low  <= invalidateBelow;
+                bool invalidaResistencia = !cz.IsSupport && m1High >= invalidateAbove;
+
+                if (invalidaSoporte || invalidaResistencia)
+                {
+                    cz.InvalidationTime = m1CloseTime;
+                    VnRemoveFromDrawQueue(cz.Tag);
+                    VnConvertirEnHistorico(cz);
+                    vnActive.RemoveAt(i);
+                    VnRefreshUltimoNivel();
+                }
+            }
+        }
+
+        private void VnProcessDrawQueue()
+        {
+            for (int j = vnDrawQueue.Count - 1; j >= 0; j--)
+            {
+                var cz = vnDrawQueue[j];
+                vnDrawQueue.RemoveAt(j);
+
+                if (!VnIsActiveTag(cz.Tag))
+                {
+                    RemoveDrawObjectSafe(cz.Tag);
+                    RemoveDrawObjectSafe(cz.Tag + "_lbl");
+                    continue;
+                }
+
+                VnDibujarLineaHorizontalEnPrincipal(cz);
+            }
+        }
+
+        private void VnDibujarLineaHorizontalEnPrincipal(ClusterZone cz)
+        {
+            Brush color = cz.IsSupport ? vnSoporteBrush : vnResistenciaBrush;
+
+            int startBarsAgo = VnBarsAgoFromTimeOnPrimary(cz.FormationTime);
+            if (startBarsAgo <= 0) startBarsAgo = 1;
+            int primaryCurrentBar = CurrentBars[0];
+            if (primaryCurrentBar < 0)
+                primaryCurrentBar = 0;
+            startBarsAgo = Math.Min(startBarsAgo, primaryCurrentBar);
+            int endBarsAgo = Math.Max(0, startBarsAgo - 1);
+
+            RemoveDrawObjectSafe(cz.Tag);
+            RemoveDrawObjectSafe(cz.Tag + "_lbl");
+            RemoveDrawObjectSafe(cz.Tag + "_hist");
+            RemoveDrawObjectSafe(cz.Tag + "_lbl_hist");
+
+            var ray = Draw.Ray(this, cz.Tag, startBarsAgo, cz.Level, endBarsAgo, cz.Level, color);
+
+            double yLabel = Instrument.MasterInstrument.RoundToTickSize(cz.Level + 2 * TickSize);
+            Draw.Text(this, cz.Tag + "_lbl", "VolCluster", startBarsAgo, yLabel, color);
+
+            VnTryStyleRayWithReflection(ray, color, vnGrosorLineaFijo);
+        }
+
+        private void VnConvertirEnHistorico(ClusterZone cz)
+        {
+            Brush color = cz.IsSupport ? vnSoporteBrush : vnResistenciaBrush;
+
+            RemoveDrawObjectSafe(cz.Tag);
+            RemoveDrawObjectSafe(cz.Tag + "_lbl");
+            RemoveDrawObjectSafe(cz.Tag + "_hist");
+            RemoveDrawObjectSafe(cz.Tag + "_lbl_hist");
+
+            int startBarsAgo = VnBarsAgoFromTimeOnPrimary(cz.FormationTime);
+            if (startBarsAgo <= 0) startBarsAgo = 1;
+            int primaryCurrentBar = CurrentBars[0];
+            if (primaryCurrentBar < 0)
+                primaryCurrentBar = 0;
+            startBarsAgo = Math.Min(startBarsAgo, primaryCurrentBar);
+            int endBarsAgo = VnBarsAgoFromTimeOnPrimary(cz.InvalidationTime);
+            if (endBarsAgo < 0) endBarsAgo = 0;
+            endBarsAgo = Math.Min(endBarsAgo, primaryCurrentBar);
+
+            var line = Draw.Line(this, cz.Tag + "_hist", startBarsAgo, cz.Level, endBarsAgo, cz.Level, color);
+            double yLabel = Instrument.MasterInstrument.RoundToTickSize(cz.Level + 2 * TickSize);
+            Draw.Text(this, cz.Tag + "_lbl_hist", "VolCluster", startBarsAgo, yLabel, color);
+            VnTryStyleRayWithReflection(line, color, vnGrosorLineaFijo);
+
+            if (!vnHistorical.Contains(cz))
+                vnHistorical.Add(cz);
+        }
+
+        private void VnTryStyleRayWithReflection(object ray, Brush color, int width)
+        {
+            try
+            {
+                if (ray == null) return;
+                var t = ray.GetType();
+
+                var outlineBrushProp = t.GetProperty("OutlineBrush");
+                outlineBrushProp?.SetValue(ray, color, null);
+
+                var dashProp = t.GetProperty("DashStyleHelper");
+                if (dashProp != null && dashProp.PropertyType.IsEnum)
+                {
+                    object dot = Enum.Parse(dashProp.PropertyType, "Dot", true);
+                    dashProp.SetValue(ray, dot, null);
+                }
+
+                var widthProp = t.GetProperty("Width");
+                if (widthProp != null && widthProp.PropertyType == typeof(int))
+                    widthProp.SetValue(ray, width, null);
+
+                var strokeProp = t.GetProperty("Stroke");
+                if (strokeProp != null)
+                {
+                    var strokeType = strokeProp.PropertyType;
+                    object strokeObj = null;
+
+                    var ctor2 = strokeType.GetConstructor(new Type[] { typeof(Brush), typeof(int) });
+                    if (ctor2 != null)
+                        strokeObj = ctor2.Invoke(new object[] { color, width });
+                    else
+                    {
+                        var dashType = dashProp?.PropertyType;
+                        if (dashType != null)
+                        {
+                            var ctor3 = strokeType.GetConstructor(new Type[] { typeof(Brush), dashType, typeof(int) });
+                            if (ctor3 != null)
+                            {
+                                object dot = Enum.Parse(dashType, "Dot", true);
+                                strokeObj = ctor3.Invoke(new object[] { color, dot, width });
+                            }
+                        }
+                    }
+
+                    if (strokeObj != null)
+                        strokeProp.SetValue(ray, strokeObj, null);
+                }
+            }
+            catch
+            {
+                // Silencioso
+            }
+        }
+
+        private int VnBarsAgoFromTimeOnPrimary(DateTime time)
+        {
+            int primaryCurrentBar = CurrentBars[0];
+            if (primaryCurrentBar < 0)
+                primaryCurrentBar = 0;
+
+            int idxOnPrimary = Bars.GetBar(time);
+            if (idxOnPrimary < 0)
+                return primaryCurrentBar;
+
+            int barsAgo = primaryCurrentBar - idxOnPrimary;
+            if (barsAgo < 0)
+                barsAgo = 0;
+            if (barsAgo > primaryCurrentBar)
+                barsAgo = primaryCurrentBar;
+            return barsAgo;
+        }
+
+        private void VnRefreshUltimoNivel()
+        {
+            vnUltimoNivelActual = (vnActive.Count > 0) ? vnActive[vnActive.Count - 1].Level : double.NaN;
+        }
+
+        private void VnRemoveFromDrawQueue(string tag)
+        {
+            for (int j = vnDrawQueue.Count - 1; j >= 0; j--)
+                if (vnDrawQueue[j].Tag == tag) vnDrawQueue.RemoveAt(j);
+        }
+
+        private void VnRemoveActiveByTag(string tag)
+        {
+            for (int i = vnActive.Count - 1; i >= 0; i--)
+                if (vnActive[i].Tag == tag) vnActive.RemoveAt(i);
+            VnRefreshUltimoNivel();
+        }
+
+        private bool VnIsActiveTag(string tag)
+        {
+            for (int i = 0; i < vnActive.Count; i++)
+                if (vnActive[i].Tag == tag) return true;
+            return false;
+        }
+
+        private void ResetVolumeClusterModule()
+        {
+            var tags = new HashSet<string>();
+            foreach (var cz in vnPending)
+                tags.Add(cz.Tag);
+            foreach (var cz in vnActive)
+                tags.Add(cz.Tag);
+            foreach (var cz in vnDrawQueue)
+                tags.Add(cz.Tag);
+            foreach (var cz in vnHistorical)
+            {
+                tags.Add(cz.Tag);
+                tags.Add(cz.Tag + "_hist");
+                tags.Add(cz.Tag + "_lbl_hist");
+            }
+
+            foreach (var tag in tags)
+            {
+                RemoveDrawObjectSafe(tag);
+                RemoveDrawObjectSafe(tag + "_lbl");
+                RemoveDrawObjectSafe(tag + "_hist");
+                RemoveDrawObjectSafe(tag + "_lbl_hist");
+            }
+
+            vnPending.Clear();
+            vnActive.Clear();
+            vnDrawQueue.Clear();
+            vnHistorical.Clear();
+
+            vnUltimoNivelActual = double.NaN;
+        }
+        #endregion
     }
 }
 
@@ -1106,18 +1561,18 @@ namespace NinjaTrader.NinjaScript.Indicators
 public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
 {
 private a2hub[] cachea2hub;
-public a2hub a2hub(int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol)
+public a2hub a2hub(bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre)
 {
-return a2hub(Input, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol);
+return a2hub(Input, minTradeModuleOn, resetSessionOnNewSession, imbalanceModuleOn, volumeClusterModuleOn, globalTimeFrameMinutes, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, porcentajeConcentrado, ticksAlrededor, minVelasConfirmacion, margenTicksBorre);
 }
 
-public a2hub a2hub(ISeries<double> input, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol)
+public a2hub a2hub(ISeries<double> input, bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre)
 {
 if (cachea2hub != null)
 for (int idx = 0; idx < cachea2hub.Length; idx++)
-if (cachea2hub[idx] != null && cachea2hub[idx].MinTrade == minTrade && cachea2hub[idx].ToleranciaTicks == toleranciaTicks && cachea2hub[idx].ClusterWindowMs == clusterWindowMs && cachea2hub[idx].DriftTicks == driftTicks && cachea2hub[idx].UseAlMenos == useAlMenos && cachea2hub[idx].AlMenosMinTrade == alMenosMinTrade && cachea2hub[idx].UseMinPrint == useMinPrint && cachea2hub[idx].MinPrintVol == minPrintVol && cachea2hub[idx].EqualsInput(input))
+if (cachea2hub[idx] != null && cachea2hub[idx].MinTradeModuleOn == minTradeModuleOn && cachea2hub[idx].ResetSessionOnNewSession == resetSessionOnNewSession && cachea2hub[idx].ImbalanceModuleOn == imbalanceModuleOn && cachea2hub[idx].VolumeClusterModuleOn == volumeClusterModuleOn && cachea2hub[idx].GlobalTimeFrameMinutes == globalTimeFrameMinutes && cachea2hub[idx].MinTrade == minTrade && cachea2hub[idx].ToleranciaTicks == toleranciaTicks && cachea2hub[idx].ClusterWindowMs == clusterWindowMs && cachea2hub[idx].DriftTicks == driftTicks && cachea2hub[idx].UseAlMenos == useAlMenos && cachea2hub[idx].AlMenosMinTrade == alMenosMinTrade && cachea2hub[idx].UseMinPrint == useMinPrint && cachea2hub[idx].MinPrintVol == minPrintVol && cachea2hub[idx].StackImbalance == stackImbalance && cachea2hub[idx].ImbalanceRatio.ApproxCompare(imbalanceRatio) == 0 && cachea2hub[idx].MinDeltaImbalance == minDeltaImbalance && cachea2hub[idx].ToleranciaBorrarTicks == toleranciaBorrarTicks && cachea2hub[idx].FiltroSupervivencia == filtroSupervivencia && cachea2hub[idx].PorcentajeConcentrado == porcentajeConcentrado && cachea2hub[idx].TicksAlrededor == ticksAlrededor && cachea2hub[idx].MinVelasConfirmacion == minVelasConfirmacion && cachea2hub[idx].MargenTicksBorre == margenTicksBorre && cachea2hub[idx].EqualsInput(input))
 return cachea2hub[idx];
-return CacheIndicator<a2hub>(new a2hub(){ MinTrade = minTrade, ToleranciaTicks = toleranciaTicks, ClusterWindowMs = clusterWindowMs, DriftTicks = driftTicks, UseAlMenos = useAlMenos, AlMenosMinTrade = alMenosMinTrade, UseMinPrint = useMinPrint, MinPrintVol = minPrintVol }, input, ref cachea2hub);
+return CacheIndicator<a2hub>(new a2hub(){ MinTradeModuleOn = minTradeModuleOn, ResetSessionOnNewSession = resetSessionOnNewSession, ImbalanceModuleOn = imbalanceModuleOn, VolumeClusterModuleOn = volumeClusterModuleOn, GlobalTimeFrameMinutes = globalTimeFrameMinutes, MinTrade = minTrade, ToleranciaTicks = toleranciaTicks, ClusterWindowMs = clusterWindowMs, DriftTicks = driftTicks, UseAlMenos = useAlMenos, AlMenosMinTrade = alMenosMinTrade, UseMinPrint = useMinPrint, MinPrintVol = minPrintVol, StackImbalance = stackImbalance, ImbalanceRatio = imbalanceRatio, MinDeltaImbalance = minDeltaImbalance, ToleranciaBorrarTicks = toleranciaBorrarTicks, FiltroSupervivencia = filtroSupervivencia, PorcentajeConcentrado = porcentajeConcentrado, TicksAlrededor = ticksAlrededor, MinVelasConfirmacion = minVelasConfirmacion, MargenTicksBorre = margenTicksBorre }, input, ref cachea2hub);
 }
 }
 }
@@ -1126,14 +1581,14 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
 public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
 {
-public Indicators.a2hub a2hub(int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol)
+public Indicators.a2hub a2hub(bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre)
 {
-return indicator.a2hub(Input, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol);
+return indicator.a2hub(Input, minTradeModuleOn, resetSessionOnNewSession, imbalanceModuleOn, volumeClusterModuleOn, globalTimeFrameMinutes, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, porcentajeConcentrado, ticksAlrededor, minVelasConfirmacion, margenTicksBorre);
 }
 
-public Indicators.a2hub a2hub(ISeries<double> input , int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol)
+public Indicators.a2hub a2hub(ISeries<double> input , bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre)
 {
-return indicator.a2hub(input, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol);
+return indicator.a2hub(input, minTradeModuleOn, resetSessionOnNewSession, imbalanceModuleOn, volumeClusterModuleOn, globalTimeFrameMinutes, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, porcentajeConcentrado, ticksAlrededor, minVelasConfirmacion, margenTicksBorre);
 }
 }
 }
@@ -1142,14 +1597,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
 public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
 {
-public Indicators.a2hub a2hub(int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol)
+public Indicators.a2hub a2hub(bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre)
 {
-return indicator.a2hub(Input, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol);
+return indicator.a2hub(Input, minTradeModuleOn, resetSessionOnNewSession, imbalanceModuleOn, volumeClusterModuleOn, globalTimeFrameMinutes, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, porcentajeConcentrado, ticksAlrededor, minVelasConfirmacion, margenTicksBorre);
 }
 
-public Indicators.a2hub a2hub(ISeries<double> input , int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol)
+public Indicators.a2hub a2hub(ISeries<double> input , bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre)
 {
-return indicator.a2hub(input, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol);
+return indicator.a2hub(input, minTradeModuleOn, resetSessionOnNewSession, imbalanceModuleOn, volumeClusterModuleOn, globalTimeFrameMinutes, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, porcentajeConcentrado, ticksAlrededor, minVelasConfirmacion, margenTicksBorre);
 }
 }
 }
