@@ -794,7 +794,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                     low  = t;
                 }
 
-                int volumesCount = volBarsType.Volumes?.Count ?? 0;
+                int volumesCount = volBarsType.Volumes.Count;
                 if (volBarIndex < 0 || volBarIndex >= volumesCount)
                     return;
 
