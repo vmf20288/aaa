@@ -1184,8 +1184,9 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private void DrawUbLine(UBLevel lvl, DateTime startTime, DateTime endTime)
         {
-            Brush b = lvl.IsHigh ? ubBrushHigh : ubBrushLow;
-            Draw.Ray(this, lvl.TagLine, false, startTime, lvl.Price, endTime, lvl.Price, b, DashStyleHelper.Dash, ubLineWidth);
+            Brush b          = lvl.IsHigh ? ubBrushHigh : ubBrushLow;
+            int   startBars  = Bars.GetBar(startTime);
+            Draw.Ray(this, lvl.TagLine, false, startBars, lvl.Price, 0, lvl.Price, b, DashStyleHelper.Dash, ubLineWidth);
         }
 
         private void DrawUbText(UBLevel lvl)
