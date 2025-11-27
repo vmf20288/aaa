@@ -794,6 +794,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                     low  = t;
                 }
 
+                int volumesCount = volBarsType.Volumes?.Count ?? 0;
+                if (volBarIndex < 0 || volBarIndex >= volumesCount)
+                    return;
+
                 if (ImbalanceModuleOn)
                 {
                     DetectAndDrawStacks(volBarIndex, volBarTime, low, high, true);
