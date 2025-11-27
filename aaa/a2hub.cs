@@ -35,14 +35,21 @@
 //       * Si el cluster tiene tamaño ≥ 2, dibuja un rayo horizontal etiquetado "multiple node".
 //       * Clasifica con el primer cierre de 1m posterior: cierre > nivel → Demand (verde); cierre < nivel → Supply (rojo).
 //       * Borra por cierre de 1m con tolerancia direccional (ToleranciaTicks) manteniendo el histórico del nivel.
+//   - Módulo UB (Unfinished Business):
+//       * Detecta UB en barras Volumétricas (Order Flow+, Delta BidAsk) con el time frame GlobalTimeFrameMinutes compartido.
+//       * UB High: si en el precio del High hay volumen en el Bid (Bid@High >= MinOppositeVolume).
+//       * UB Low : si en el precio del Low  hay volumen en el Ask (Ask@Low  >= MinOppositeVolume).
+//       * Dibuja línea horizontal punteada desde la barra de detección hacia la derecha y texto "unfibusi" encima.
+//       * Se borra al producirse trade-through de 1 tick: High/Last > nivel + TickSize (High) o Low/Last < nivel - TickSize (Low).
 //   - Módulo Global:
 //       * MinTrade (ON/OFF): activa/desactiva completamente el módulo MinTrade (detección y dibujo).
 //       * Imbalance (IM) (ON/OFF): interruptor maestro del módulo Imbalance.
 //       * VolumeCluster (VN) (ON/OFF): interruptor maestro del módulo VolumeCluster.
 //       * MultipleNode (X) (ON/OFF): interruptor maestro del módulo MultipleNode.
+//       * UB (ON/OFF): interruptor maestro del módulo Unfinished Business.
 //       * Reset session (ON/OFF): controla si se limpian niveles y estado al inicio de cada nueva sesión
 //         (ON = igual que ahora, OFF = conserva niveles históricos en el gráfico).
-//       * Time frame (min): marco temporal global que usan los módulos basados en velas/Volumetric (IM, VN y X).
+//       * Time frame (min): marco temporal global que usan los módulos basados en velas/Volumetric (IM, VN, X y UB).
 //
 // Parámetros expuestos (solo los acordados):
 //   - MinTrade (int)                 -> umbral de volumen del clúster para generar el nivel.
@@ -155,6 +162,65 @@ namespace NinjaTrader.NinjaScript.Indicators
         // v6: radio fijo de proximidad para dedupe por lado (en ticks)
         private const int ProximityTicksFixed = 10;
 
+        // --- Unfinished Business (UB) ---
+        #region Unfinished Business (UB)
+        private class UBLevel
+        {
+            public double   Price;
+            public bool     IsHigh;
+            public DateTime DetectedTime;
+            public string   TagLine;
+            public string   TagText;
+        }
+
+        private readonly List<UBLevel>               ubLevels     = new List<UBLevel>();
+        private readonly Dictionary<string, UBLevel> ubLevelsByKey = new Dictionary<string, UBLevel>();
+        private SimpleFont                           ubTextFont;
+        private readonly Brush                       ubBrushHigh   = Brushes.Red;
+        private readonly Brush                       ubBrushLow    = Brushes.Green;
+        private const int                            ubLineWidth   = 2;
+        private const int                            ubTextOffsetTicks = 1;
+
+        private static readonly MethodInfo ubDrawLineTimeWithStyle;
+        private static readonly MethodInfo ubDrawLineTimeWidthOnly;
+        private static readonly MethodInfo ubDrawLineTimeBasic;
+        private static readonly object     ubDashStyleDashValue;
+        #endregion
+
+        static a2hub()
+        {
+            foreach (var method in typeof(Draw).GetMethods(BindingFlags.Public | BindingFlags.Static))
+            {
+                if (method.Name != "Line")
+                    continue;
+
+                var parameters = method.GetParameters();
+                if (parameters.Length == 10 && parameters[3].ParameterType == typeof(DateTime) && parameters[5].ParameterType == typeof(DateTime))
+                {
+                    if (parameters[8].ParameterType.IsEnum)
+                    {
+                        ubDrawLineTimeWithStyle = method;
+                        try
+                        {
+                            ubDashStyleDashValue = Enum.Parse(parameters[8].ParameterType, "Dash");
+                        }
+                        catch
+                        {
+                            ubDashStyleDashValue = null;
+                        }
+                    }
+                }
+                else if (parameters.Length == 9 && parameters[3].ParameterType == typeof(DateTime) && parameters[5].ParameterType == typeof(DateTime) && parameters[8].ParameterType == typeof(int))
+                {
+                    ubDrawLineTimeWidthOnly = method;
+                }
+                else if (parameters.Length == 8 && parameters[3].ParameterType == typeof(DateTime) && parameters[5].ParameterType == typeof(DateTime))
+                {
+                    ubDrawLineTimeBasic = method;
+                }
+            }
+        }
+
         // --- VolumeCluster (VN) ---
         private class ClusterZone
         {
@@ -246,8 +312,12 @@ namespace NinjaTrader.NinjaScript.Indicators
         public bool MultipleNodeModuleOn { get; set; }
 
         [NinjaScriptProperty]
+        [Display(Name = "UB (ON/OFF)", Order = 5, GroupName = "Global")]
+        public bool UBModuleOn { get; set; }
+
+        [NinjaScriptProperty]
         [Range(1, int.MaxValue)]
-        [Display(Name = "Time frame (min)", Order = 5, GroupName = "Global")]
+        [Display(Name = "Time frame (min)", Order = 6, GroupName = "Global")]
         public int GlobalTimeFrameMinutes { get; set; }
 
         [NinjaScriptProperty]
@@ -347,6 +417,11 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "Tolerancia ticks (cierre 1m)", GroupName = "MultipleNode (X)", Order = 3)]
         public int MultipleNodeToleranciaTicks { get; set; }
 
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "MinVolume (opuesto)", GroupName = "UB", Order = 1)]
+        public int MinOppositeVolume { get; set; }
+
         // Salidas públicas (último evento)
         [Browsable(false), XmlIgnore] public Series<double> LastMinTradeVolume => volumeSeries;
         [Browsable(false), XmlIgnore] public Series<double> LastMinTradePrice  => priceSeries;
@@ -404,6 +479,8 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             ClearAllStackLines();
 
+            UbClearAllLevels();
+
             ResetVolumeClusterModule();
 
             if (volBip >= 0 && volBip < BarsArray.Length)
@@ -455,6 +532,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 ImbalanceModuleOn        = true;
                 VolumeClusterModuleOn    = true;
                 MultipleNodeModuleOn     = true;
+                UBModuleOn               = true;
                 GlobalTimeFrameMinutes   = 5;
                 MinTrade                = 25;
                 ToleranciaTicks         = 8;
@@ -476,6 +554,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                 MultipleNodeVentanaMin       = 25;
                 MultipleNodeTicksAlrededor   = 6;
                 MultipleNodeToleranciaTicks  = 6;
+                MinOppositeVolume            = 1;
+
+                ubTextFont = new SimpleFont("Arial", 12) { Bold = true };
 
                 AddPlot(Brushes.Transparent, "LastMinTradeVolume");
                 AddPlot(Brushes.Transparent, "LastMinTradePrice");
@@ -509,6 +590,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                 multipleNodeTickSize  = Instrument.MasterInstrument.TickSize;
                 multipleNodeTagPrefix = $"a2MN_{Instrument.MasterInstrument.Name}";
                 multipleNodeLabelFont = new SimpleFont("Arial", 10);
+
+                if (ubTextFont == null)
+                    ubTextFont = new SimpleFont("Arial", 12) { Bold = true };
             }
         }
         #endregion
@@ -516,10 +600,13 @@ namespace NinjaTrader.NinjaScript.Indicators
         #region OnMarketData (tiempo real, inferir lado)
         protected override void OnMarketData(MarketDataEventArgs e)
         {
-            if (!MinTradeModuleOn)
+            if (BarsInProgress != 0)
                 return;
 
-            if (BarsInProgress != 0)
+            if (UBModuleOn && ubLevels.Count > 0 && e.MarketDataType == MarketDataType.Last)
+                UbHandleMarketDataLast(e.Price);
+
+            if (!MinTradeModuleOn)
                 return;
 
             if (e.MarketDataType == MarketDataType.Bid) bestBid = e.Price;
@@ -552,6 +639,12 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 if (VolumeClusterModuleOn && vnDrawQueue.Count > 0)
                     VnProcessDrawQueue();
+
+                if (UBModuleOn && ubLevels.Count > 0)
+                {
+                    ExtendUbLinesToRightEdge(Time[0]);
+                    UbTestAndRemoveCompletedLevels(High[0], Low[0]);
+                }
 
                 volumeSeries[0] = double.NaN;
                 priceSeries[0]  = double.NaN;
@@ -659,7 +752,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             if (volBip >= 0 && BarsInProgress == volBip)
             {
-                if (!ImbalanceModuleOn && !VolumeClusterModuleOn && !MultipleNodeModuleOn)
+                if (!ImbalanceModuleOn && !VolumeClusterModuleOn && !MultipleNodeModuleOn && !UBModuleOn)
                     return;
 
                 if (volBarsType == null || CurrentBars[volBip] < 0 || volTickSize <= 0)
@@ -712,6 +805,25 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 if (MultipleNodeModuleOn)
                     MultipleNodeDetect(volBarIndex, volBarTime);
+
+                if (UBModuleOn)
+                {
+                    var volumes = volBarsType.Volumes[volBarIndex];
+                    long bidAtHigh = volumes.GetBidVolumeForPrice(high);
+                    long askAtLow  = volumes.GetAskVolumeForPrice(low);
+
+                    bool ubHigh = bidAtHigh >= MinOppositeVolume;
+                    bool ubLow  = askAtLow  >= MinOppositeVolume;
+
+                    if (ubHigh)
+                        AddUbLevel(Instrument.MasterInstrument.RoundToTickSize(high), true, volBarTime);
+
+                    if (ubLow)
+                        AddUbLevel(Instrument.MasterInstrument.RoundToTickSize(low), false, volBarTime);
+
+                    if (ubLevels.Count > 0)
+                        UbTestAndRemoveCompletedLevels(high, low);
+                }
 
                 return;
             }
@@ -1041,6 +1153,118 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             try { RemoveDrawObject(tag); } catch { /* ignore */ }
         }
+
+        #endregion
+
+        #region Unfinished Business (UB) helpers
+        private void AddUbLevel(double price, bool isHigh, DateTime detectedTime)
+        {
+            string key = BuildUbKey(price, isHigh);
+            if (ubLevelsByKey.ContainsKey(key))
+                return;
+
+            var lvl = new UBLevel
+            {
+                Price        = price,
+                IsHigh       = isHigh,
+                DetectedTime = detectedTime,
+                TagLine      = $"a2unfibusi_line_{(isHigh ? "H" : "L")}_{price.ToString("0.#####", CultureInfo.InvariantCulture)}_{detectedTime:yyyyMMddHHmmss}",
+                TagText      = $"a2unfibusi_txt_{(isHigh ? "H" : "L")}_{price.ToString("0.#####", CultureInfo.InvariantCulture)}_{detectedTime:yyyyMMddHHmmss}"
+            };
+
+            ubLevels.Add(lvl);
+            ubLevelsByKey[key] = lvl;
+
+            DateTime endTime = (CurrentBars[0] >= 0) ? Times[0][0] : detectedTime;
+            DrawUbLine(lvl, detectedTime, endTime);
+            DrawUbText(lvl);
+        }
+
+        private void DrawUbLine(UBLevel lvl, DateTime startTime, DateTime endTime)
+        {
+            Brush b = lvl.IsHigh ? ubBrushHigh : ubBrushLow;
+            if (ubDrawLineTimeWithStyle != null && ubDashStyleDashValue != null)
+            {
+                ubDrawLineTimeWithStyle.Invoke(null, new object[] { this, lvl.TagLine, false, startTime, lvl.Price, endTime, lvl.Price, b, ubDashStyleDashValue, ubLineWidth });
+                return;
+            }
+
+            if (ubDrawLineTimeWidthOnly != null)
+            {
+                ubDrawLineTimeWidthOnly.Invoke(null, new object[] { this, lvl.TagLine, false, startTime, lvl.Price, endTime, lvl.Price, b, ubLineWidth });
+                return;
+            }
+
+            if (ubDrawLineTimeBasic != null)
+                ubDrawLineTimeBasic.Invoke(null, new object[] { this, lvl.TagLine, false, startTime, lvl.Price, endTime, lvl.Price, b });
+        }
+
+        private void DrawUbText(UBLevel lvl)
+        {
+            double y = lvl.Price + ubTextOffsetTicks * TickSize;
+            Brush  b = lvl.IsHigh ? ubBrushHigh : ubBrushLow;
+
+            Draw.Text(this, lvl.TagText, false, "unfibusi", lvl.DetectedTime, y, 0, b, ubTextFont, System.Windows.TextAlignment.Left, null, null, 0);
+        }
+
+        private void ExtendUbLinesToRightEdge(DateTime endTime)
+        {
+            foreach (var lvl in ubLevels)
+                DrawUbLine(lvl, lvl.DetectedTime, endTime);
+        }
+
+        private void UbTestAndRemoveCompletedLevels(double upThreshold, double downThreshold)
+        {
+            if (!UBModuleOn || ubLevels.Count == 0)
+                return;
+
+            double upThr   = Instrument.MasterInstrument.RoundToTickSize(upThreshold);
+            double downThr = Instrument.MasterInstrument.RoundToTickSize(downThreshold);
+
+            var toRemove = new List<UBLevel>();
+            foreach (var lvl in ubLevels)
+            {
+                if (IsUbLevelCompleted(lvl, upThr, downThr))
+                    toRemove.Add(lvl);
+            }
+
+            foreach (var lvl in toRemove)
+                UbRemoveLevel(lvl);
+        }
+
+        private void UbHandleMarketDataLast(double price)
+        {
+            if (!UBModuleOn || ubLevels.Count == 0)
+                return;
+
+            double last = Instrument.MasterInstrument.RoundToTickSize(price);
+            UbTestAndRemoveCompletedLevels(last, last);
+        }
+
+        private void UbRemoveLevel(UBLevel lvl)
+        {
+            RemoveDrawObjectSafe(lvl.TagLine);
+            RemoveDrawObjectSafe(lvl.TagText);
+
+            ubLevels.Remove(lvl);
+            string key = BuildUbKey(lvl.Price, lvl.IsHigh);
+            if (ubLevelsByKey.ContainsKey(key))
+                ubLevelsByKey.Remove(key);
+        }
+
+        private void UbClearAllLevels()
+        {
+            foreach (var lvl in ubLevels.ToList())
+                UbRemoveLevel(lvl);
+        }
+
+        private bool IsUbLevelCompleted(UBLevel lvl, double upThr, double downThr)
+            => lvl.IsHigh ? upThr >= lvl.Price + TickSize : downThr <= lvl.Price - TickSize;
+
+        private static string BuildUbKey(double price, bool isHigh)
+            => $"{(isHigh ? "H" : "L")}@{price.ToString("0.#####", CultureInfo.InvariantCulture)}";
+
+        #endregion
 
         #region MultipleNode (X) helpers
         private void MultipleNodeDetect(int volBarIndex, DateTime volBarTime)
@@ -1832,18 +2056,18 @@ namespace NinjaTrader.NinjaScript.Indicators
 public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
 {
 private a2hub[] cachea2hub;
-public a2hub a2hub(bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre)
+public a2hub a2hub(bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, bool multipleNodeModuleOn, bool uBModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre, int multipleNodeVentanaMin, int multipleNodeTicksAlrededor, int multipleNodeToleranciaTicks, int minOppositeVolume)
 {
-return a2hub(Input, minTradeModuleOn, resetSessionOnNewSession, imbalanceModuleOn, volumeClusterModuleOn, globalTimeFrameMinutes, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, porcentajeConcentrado, ticksAlrededor, minVelasConfirmacion, margenTicksBorre);
+return a2hub(Input, minTradeModuleOn, resetSessionOnNewSession, imbalanceModuleOn, volumeClusterModuleOn, multipleNodeModuleOn, uBModuleOn, globalTimeFrameMinutes, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, porcentajeConcentrado, ticksAlrededor, minVelasConfirmacion, margenTicksBorre, multipleNodeVentanaMin, multipleNodeTicksAlrededor, multipleNodeToleranciaTicks, minOppositeVolume);
 }
 
-public a2hub a2hub(ISeries<double> input, bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre)
+public a2hub a2hub(ISeries<double> input, bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, bool multipleNodeModuleOn, bool uBModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre, int multipleNodeVentanaMin, int multipleNodeTicksAlrededor, int multipleNodeToleranciaTicks, int minOppositeVolume)
 {
 if (cachea2hub != null)
 for (int idx = 0; idx < cachea2hub.Length; idx++)
-if (cachea2hub[idx] != null && cachea2hub[idx].MinTradeModuleOn == minTradeModuleOn && cachea2hub[idx].ResetSessionOnNewSession == resetSessionOnNewSession && cachea2hub[idx].ImbalanceModuleOn == imbalanceModuleOn && cachea2hub[idx].VolumeClusterModuleOn == volumeClusterModuleOn && cachea2hub[idx].GlobalTimeFrameMinutes == globalTimeFrameMinutes && cachea2hub[idx].MinTrade == minTrade && cachea2hub[idx].ToleranciaTicks == toleranciaTicks && cachea2hub[idx].ClusterWindowMs == clusterWindowMs && cachea2hub[idx].DriftTicks == driftTicks && cachea2hub[idx].UseAlMenos == useAlMenos && cachea2hub[idx].AlMenosMinTrade == alMenosMinTrade && cachea2hub[idx].UseMinPrint == useMinPrint && cachea2hub[idx].MinPrintVol == minPrintVol && cachea2hub[idx].StackImbalance == stackImbalance && cachea2hub[idx].ImbalanceRatio.ApproxCompare(imbalanceRatio) == 0 && cachea2hub[idx].MinDeltaImbalance == minDeltaImbalance && cachea2hub[idx].ToleranciaBorrarTicks == toleranciaBorrarTicks && cachea2hub[idx].FiltroSupervivencia == filtroSupervivencia && cachea2hub[idx].PorcentajeConcentrado == porcentajeConcentrado && cachea2hub[idx].TicksAlrededor == ticksAlrededor && cachea2hub[idx].MinVelasConfirmacion == minVelasConfirmacion && cachea2hub[idx].MargenTicksBorre == margenTicksBorre && cachea2hub[idx].EqualsInput(input))
+if (cachea2hub[idx] != null && cachea2hub[idx].MinTradeModuleOn == minTradeModuleOn && cachea2hub[idx].ResetSessionOnNewSession == resetSessionOnNewSession && cachea2hub[idx].ImbalanceModuleOn == imbalanceModuleOn && cachea2hub[idx].VolumeClusterModuleOn == volumeClusterModuleOn && cachea2hub[idx].MultipleNodeModuleOn == multipleNodeModuleOn && cachea2hub[idx].UBModuleOn == uBModuleOn && cachea2hub[idx].GlobalTimeFrameMinutes == globalTimeFrameMinutes && cachea2hub[idx].MinTrade == minTrade && cachea2hub[idx].ToleranciaTicks == toleranciaTicks && cachea2hub[idx].ClusterWindowMs == clusterWindowMs && cachea2hub[idx].DriftTicks == driftTicks && cachea2hub[idx].UseAlMenos == useAlMenos && cachea2hub[idx].AlMenosMinTrade == alMenosMinTrade && cachea2hub[idx].UseMinPrint == useMinPrint && cachea2hub[idx].MinPrintVol == minPrintVol && cachea2hub[idx].StackImbalance == stackImbalance && cachea2hub[idx].ImbalanceRatio.ApproxCompare(imbalanceRatio) == 0 && cachea2hub[idx].MinDeltaImbalance == minDeltaImbalance && cachea2hub[idx].ToleranciaBorrarTicks == toleranciaBorrarTicks && cachea2hub[idx].FiltroSupervivencia == filtroSupervivencia && cachea2hub[idx].PorcentajeConcentrado == porcentajeConcentrado && cachea2hub[idx].TicksAlrededor == ticksAlrededor && cachea2hub[idx].MinVelasConfirmacion == minVelasConfirmacion && cachea2hub[idx].MargenTicksBorre == margenTicksBorre && cachea2hub[idx].MultipleNodeVentanaMin == multipleNodeVentanaMin && cachea2hub[idx].MultipleNodeTicksAlrededor == multipleNodeTicksAlrededor && cachea2hub[idx].MultipleNodeToleranciaTicks == multipleNodeToleranciaTicks && cachea2hub[idx].MinOppositeVolume == minOppositeVolume && cachea2hub[idx].EqualsInput(input))
 return cachea2hub[idx];
-return CacheIndicator<a2hub>(new a2hub(){ MinTradeModuleOn = minTradeModuleOn, ResetSessionOnNewSession = resetSessionOnNewSession, ImbalanceModuleOn = imbalanceModuleOn, VolumeClusterModuleOn = volumeClusterModuleOn, GlobalTimeFrameMinutes = globalTimeFrameMinutes, MinTrade = minTrade, ToleranciaTicks = toleranciaTicks, ClusterWindowMs = clusterWindowMs, DriftTicks = driftTicks, UseAlMenos = useAlMenos, AlMenosMinTrade = alMenosMinTrade, UseMinPrint = useMinPrint, MinPrintVol = minPrintVol, StackImbalance = stackImbalance, ImbalanceRatio = imbalanceRatio, MinDeltaImbalance = minDeltaImbalance, ToleranciaBorrarTicks = toleranciaBorrarTicks, FiltroSupervivencia = filtroSupervivencia, PorcentajeConcentrado = porcentajeConcentrado, TicksAlrededor = ticksAlrededor, MinVelasConfirmacion = minVelasConfirmacion, MargenTicksBorre = margenTicksBorre }, input, ref cachea2hub);
+return CacheIndicator<a2hub>(new a2hub(){ MinTradeModuleOn = minTradeModuleOn, ResetSessionOnNewSession = resetSessionOnNewSession, ImbalanceModuleOn = imbalanceModuleOn, VolumeClusterModuleOn = volumeClusterModuleOn, MultipleNodeModuleOn = multipleNodeModuleOn, UBModuleOn = uBModuleOn, GlobalTimeFrameMinutes = globalTimeFrameMinutes, MinTrade = minTrade, ToleranciaTicks = toleranciaTicks, ClusterWindowMs = clusterWindowMs, DriftTicks = driftTicks, UseAlMenos = useAlMenos, AlMenosMinTrade = alMenosMinTrade, UseMinPrint = useMinPrint, MinPrintVol = minPrintVol, StackImbalance = stackImbalance, ImbalanceRatio = imbalanceRatio, MinDeltaImbalance = minDeltaImbalance, ToleranciaBorrarTicks = toleranciaBorrarTicks, FiltroSupervivencia = filtroSupervivencia, PorcentajeConcentrado = porcentajeConcentrado, TicksAlrededor = ticksAlrededor, MinVelasConfirmacion = minVelasConfirmacion, MargenTicksBorre = margenTicksBorre, MultipleNodeVentanaMin = multipleNodeVentanaMin, MultipleNodeTicksAlrededor = multipleNodeTicksAlrededor, MultipleNodeToleranciaTicks = multipleNodeToleranciaTicks, MinOppositeVolume = minOppositeVolume }, input, ref cachea2hub);
 }
 }
 }
@@ -1852,14 +2076,14 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
 public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
 {
-public Indicators.a2hub a2hub(bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre)
+public Indicators.a2hub a2hub(bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, bool multipleNodeModuleOn, bool uBModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre, int multipleNodeVentanaMin, int multipleNodeTicksAlrededor, int multipleNodeToleranciaTicks, int minOppositeVolume)
 {
-return indicator.a2hub(Input, minTradeModuleOn, resetSessionOnNewSession, imbalanceModuleOn, volumeClusterModuleOn, globalTimeFrameMinutes, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, porcentajeConcentrado, ticksAlrededor, minVelasConfirmacion, margenTicksBorre);
+return indicator.a2hub(Input, minTradeModuleOn, resetSessionOnNewSession, imbalanceModuleOn, volumeClusterModuleOn, multipleNodeModuleOn, uBModuleOn, globalTimeFrameMinutes, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, porcentajeConcentrado, ticksAlrededor, minVelasConfirmacion, margenTicksBorre, multipleNodeVentanaMin, multipleNodeTicksAlrededor, multipleNodeToleranciaTicks, minOppositeVolume);
 }
 
-public Indicators.a2hub a2hub(ISeries<double> input , bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre)
+public Indicators.a2hub a2hub(ISeries<double> input , bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, bool multipleNodeModuleOn, bool uBModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre, int multipleNodeVentanaMin, int multipleNodeTicksAlrededor, int multipleNodeToleranciaTicks, int minOppositeVolume)
 {
-return indicator.a2hub(input, minTradeModuleOn, resetSessionOnNewSession, imbalanceModuleOn, volumeClusterModuleOn, globalTimeFrameMinutes, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, porcentajeConcentrado, ticksAlrededor, minVelasConfirmacion, margenTicksBorre);
+return indicator.a2hub(input, minTradeModuleOn, resetSessionOnNewSession, imbalanceModuleOn, volumeClusterModuleOn, multipleNodeModuleOn, uBModuleOn, globalTimeFrameMinutes, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, porcentajeConcentrado, ticksAlrededor, minVelasConfirmacion, margenTicksBorre, multipleNodeVentanaMin, multipleNodeTicksAlrededor, multipleNodeToleranciaTicks, minOppositeVolume);
 }
 }
 }
@@ -1868,14 +2092,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
 public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
 {
-public Indicators.a2hub a2hub(bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre)
+public Indicators.a2hub a2hub(bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, bool multipleNodeModuleOn, bool uBModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre, int multipleNodeVentanaMin, int multipleNodeTicksAlrededor, int multipleNodeToleranciaTicks, int minOppositeVolume)
 {
-return indicator.a2hub(Input, minTradeModuleOn, resetSessionOnNewSession, imbalanceModuleOn, volumeClusterModuleOn, globalTimeFrameMinutes, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, porcentajeConcentrado, ticksAlrededor, minVelasConfirmacion, margenTicksBorre);
+return indicator.a2hub(Input, minTradeModuleOn, resetSessionOnNewSession, imbalanceModuleOn, volumeClusterModuleOn, multipleNodeModuleOn, uBModuleOn, globalTimeFrameMinutes, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, porcentajeConcentrado, ticksAlrededor, minVelasConfirmacion, margenTicksBorre, multipleNodeVentanaMin, multipleNodeTicksAlrededor, multipleNodeToleranciaTicks, minOppositeVolume);
 }
 
-public Indicators.a2hub a2hub(ISeries<double> input , bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre)
+public Indicators.a2hub a2hub(ISeries<double> input , bool minTradeModuleOn, bool resetSessionOnNewSession, bool imbalanceModuleOn, bool volumeClusterModuleOn, bool multipleNodeModuleOn, bool uBModuleOn, int globalTimeFrameMinutes, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, int porcentajeConcentrado, int ticksAlrededor, int minVelasConfirmacion, int margenTicksBorre, int multipleNodeVentanaMin, int multipleNodeTicksAlrededor, int multipleNodeToleranciaTicks, int minOppositeVolume)
 {
-return indicator.a2hub(input, minTradeModuleOn, resetSessionOnNewSession, imbalanceModuleOn, volumeClusterModuleOn, globalTimeFrameMinutes, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, porcentajeConcentrado, ticksAlrededor, minVelasConfirmacion, margenTicksBorre);
+return indicator.a2hub(input, minTradeModuleOn, resetSessionOnNewSession, imbalanceModuleOn, volumeClusterModuleOn, multipleNodeModuleOn, uBModuleOn, globalTimeFrameMinutes, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, porcentajeConcentrado, ticksAlrededor, minVelasConfirmacion, margenTicksBorre, multipleNodeVentanaMin, multipleNodeTicksAlrededor, multipleNodeToleranciaTicks, minOppositeVolume);
 }
 }
 }
