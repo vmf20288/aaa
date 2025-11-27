@@ -1419,8 +1419,6 @@ namespace NinjaTrader.NinjaScript.Indicators
         }
         #endregion
 
-        #endregion
-
         #region Imbalance (IM) module
         private void DetectAndDrawStacks(int volBarIndex, DateTime volBarTime, double low, double high, bool checkAskSide)
         {
