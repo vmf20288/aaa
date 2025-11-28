@@ -288,6 +288,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             public DateTime BarTime { get; set; } // tiempo de la barra volumétrica donde se originó
             public double RunStartPrice { get; set; } // precio de inicio del stack (para reusar tag intrabar)
             public int OriginPrimaryIndex { get; set; } // índice de la barra primaria donde se creó
+            public int RunCount { get; set; }
         }
 
         // ----------------- Propiedades expuestas -----------------
@@ -1466,6 +1467,8 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             if (runCount >= StackImbalance && !double.IsNaN(runStartPrice))
                 CreateOrUpdateStackLine(volBarTime, runStartPrice, runCount, checkAskSide);
+
+            RemoveRebalancedStacks(volBarIndex, checkAskSide);
         }
 
         private bool IsDiagonalImbalanceSafe(long dominant, long opposite)
@@ -1574,14 +1577,68 @@ namespace NinjaTrader.NinjaScript.Indicators
                     IsAskStack = isAskSide,
                     BarTime = barTime,
                     RunStartPrice = runStartPrice,
-                    OriginPrimaryIndex = GetPrimaryIndex(barTime)
+                    OriginPrimaryIndex = GetPrimaryIndex(barTime),
+                    RunCount = runCount
                 };
                 activeLines[tagRay] = infoNew;
             }
             else
             {
                 infoNew.Price = midPrice;
+                infoNew.RunCount = runCount;
             }
+        }
+
+        private void RemoveRebalancedStacks(int volBarIndex, bool checkAskSide)
+        {
+            if (activeLines.Count == 0 || volTickSize <= 0)
+                return;
+
+            var volumes = volBarsType.Volumes[volBarIndex];
+            double step = volTickSize;
+
+            var toRemove = new List<string>();
+
+            foreach (var kvp in activeLines)
+            {
+                var info = kvp.Value;
+                if (info.IsAskStack != checkAskSide)
+                    continue;
+
+                if (info.RunCount <= 0)
+                    continue;
+
+                bool stillImbalanced = true;
+
+                for (int i = 0; i < info.RunCount; i++)
+                {
+                    double price = info.RunStartPrice + i * step;
+
+                    long dominant, opposite;
+                    if (checkAskSide)
+                    {
+                        dominant = volumes.GetAskVolumeForPrice(price);
+                        opposite = volumes.GetBidVolumeForPrice(price - step);
+                    }
+                    else
+                    {
+                        dominant = volumes.GetBidVolumeForPrice(price);
+                        opposite = volumes.GetAskVolumeForPrice(price + step);
+                    }
+
+                    if (!IsDiagonalImbalanceSafe(dominant, opposite))
+                    {
+                        stillImbalanced = false;
+                        break;
+                    }
+                }
+
+                if (!stillImbalanced)
+                    toRemove.Add(kvp.Key);
+            }
+
+            foreach (var tag in toRemove)
+                RemoveStackLine(tag);
         }
 
         private void CheckInvalidations()
