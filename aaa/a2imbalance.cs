@@ -54,10 +54,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                 IsSuspendedWhileInactive = true;
                 TimeFrameVelas = 5; // minutos
                 ImbalanceRatio = 3.0; // 300%
-                MinDeltaImbalance = 0; // delta mínimo diagonal
-                StackImbalance = 3; // niveles consecutivos
+                MinDeltaImbalance = 5; // delta mínimo diagonal
+                StackImbalance = 6; // niveles consecutivos
                 ToleranciaBorrarTicks = 6; // ticks
-                FiltroSupervivencia = false;
+                FiltroSupervivencia = true;
                 SessionReset = true;
                 ShowHistory = false;
             }
