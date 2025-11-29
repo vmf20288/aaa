@@ -296,7 +296,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (ray != null && ray.Stroke != null)
             {
                 ray.Stroke.Width = 2;
-                ray.Stroke.DashStyleHelper = DashStyleHelper.Dash;
+                ray.Stroke.DashStyleHelper = NinjaTrader.Gui.DashStyleHelper.Dash;
             }
 
             Draw.Text(this, tagText, "IM", startBarsAgo, midPrice, brush);
@@ -397,7 +397,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (line != null && line.Stroke != null)
             {
                 line.Stroke.Width = 2;
-                line.Stroke.DashStyleHelper = DashStyleHelper.Dash;
+                line.Stroke.DashStyleHelper = NinjaTrader.Gui.DashStyleHelper.Dash;
             }
 
             RemoveDrawObjectSafe(info.TagText);
