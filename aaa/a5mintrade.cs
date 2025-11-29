@@ -155,6 +155,14 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "MinPrint (vol)", Order = 7, GroupName = "Parámetros")]
         public int MinPrintVol { get; set; }
 
+        [NinjaScriptProperty]
+        [Display(Name = "Reset session", Order = 8, GroupName = "Parámetros")]
+        public bool ResetSession { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Show history", Order = 9, GroupName = "Parámetros")]
+        public bool ShowHistory { get; set; }
+
         // Salidas públicas (último evento)
         [Browsable(false), XmlIgnore] public Series<double> LastMinTradeVolume => volumeSeries;
         [Browsable(false), XmlIgnore] public Series<double> LastMinTradePrice  => priceSeries;
@@ -235,6 +243,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 AlMenosMinTrade  = 10;
                 UseMinPrint      = true;
                 MinPrintVol      = 5;
+                ResetSession     = true;
+                ShowHistory      = false;
 
                 AddPlot(Brushes.Transparent, "LastMinTradeVolume");
                 AddPlot(Brushes.Transparent, "LastMinTradePrice");
@@ -274,7 +284,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             // Serie primaria: solo reseteamos salidas numéricas
             if (BarsInProgress == 0)
             {
-                if (Bars.IsFirstBarOfSession && IsFirstTickOfBar)
+                if (ResetSession && Bars.IsFirstBarOfSession && IsFirstTickOfBar)
                     ResetForNewSession();
 
                 volumeSeries[0] = double.NaN;
@@ -330,7 +340,14 @@ namespace NinjaTrader.NinjaScript.Indicators
                         {
                             lv.Invalidated = true;
                             lv.State       = LevelState.Invalid;
-                            FreezeLineAtCurrent(lv); // corta extensión
+                            if (ShowHistory)
+                                FreezeLineAtCurrent(lv); // corta extensión
+                            else
+                            {
+                                RemoveDrawObjectSafe(lv.TagLineActive);
+                                RemoveDrawObjectSafe(lv.TagLineFrozen);
+                                RemoveDrawObjectSafe(lv.TagText);
+                            }
                         }
                     }
                 }
@@ -523,7 +540,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             levels[tagBase] = lv;
 
             // Dibujo inicial: Ray NEUTRAL (gris)
-            DrawActiveRay(lv, Brushes.DimGray);
+            DrawActiveRay(lv, Brushes.Yellow);
 
             // Texto del evento (color por lado)
             DrawEventText(lv);
@@ -626,7 +643,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             Draw.Text(this,
                       lv.TagText,
-                      $"MinTrade ({lv.Volume})",
+                      lv.Volume.ToString(CultureInfo.InvariantCulture),
                       GetPrimaryBarsAgo(lv.TickTime),
                       yText,
                       textBrush);
@@ -639,6 +656,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             Brush segBrush = Brushes.DimGray;
             if (lv.State == LevelState.Supply) segBrush = Brushes.Red;
             else if (lv.State == LevelState.Demand) segBrush = Brushes.Green;
+            else if (lv.State == LevelState.Invalid) segBrush = Brushes.LightGray;
 
             int startBarsAgo = GetPrimaryBarsAgo(lv.TickTime);
             if (startBarsAgo == int.MinValue) return;
