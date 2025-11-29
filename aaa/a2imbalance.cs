@@ -149,6 +149,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             int runCount = 0;
             double runStartPrice = double.NaN;
             double step = volTickSize;
+            var currentStackMidPrices = new List<double>();
 
             // v5: límites para asegurar existencia de la diagonal vecina
             double start = checkAskSide ? (low + step) : low; // BUY (ASK) arranca en low+step
@@ -180,14 +181,51 @@ namespace NinjaTrader.NinjaScript.Indicators
                 else
                 {
                     if (runCount >= StackImbalance && !double.IsNaN(runStartPrice))
+                    {
+                        double midPrice = runStartPrice + ((runCount - 1) * 0.5) * volTickSize;
+                        currentStackMidPrices.Add(midPrice);
                         CreateOrUpdateStackLine(volBarTime, runStartPrice, runCount, checkAskSide);
+                    }
                     runCount = 0;
                     runStartPrice = double.NaN;
                 }
             }
 
             if (runCount >= StackImbalance && !double.IsNaN(runStartPrice))
+            {
+                double midPrice = runStartPrice + ((runCount - 1) * 0.5) * volTickSize;
+                currentStackMidPrices.Add(midPrice);
                 CreateOrUpdateStackLine(volBarTime, runStartPrice, runCount, checkAskSide);
+            }
+
+            if (activeLines.Count > 0)
+            {
+                double tolRebalance = volTickSize * 0.25; // pequeña tolerancia para comparar doubles
+                var toRemoveRebalanced = new List<string>();
+
+                foreach (var kvp in activeLines)
+                {
+                    var info = kvp.Value;
+                    if (info.IsAskStack != checkAskSide || info.BarTime != volBarTime)
+                        continue;
+
+                    bool stillValid = false;
+                    foreach (double mid in currentStackMidPrices)
+                    {
+                        if (Math.Abs(info.Price - mid) <= tolRebalance)
+                        {
+                            stillValid = true;
+                            break;
+                        }
+                    }
+
+                    if (!stillValid)
+                        toRemoveRebalanced.Add(kvp.Key);
+                }
+
+                foreach (var tag in toRemoveRebalanced)
+                    RemoveStackLine(tag);
+            }
         }
 
         // v5: opposite==0 -> delta mínimo; opposite>0 -> ratio + delta
