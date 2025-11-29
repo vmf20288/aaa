@@ -408,15 +408,10 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private void ClearAllStackLines()
         {
-            if (activeLines.Count == 0)
-                return;
+            // Borra todos los objetos de dibujo creados por este indicador (activos e históricos)
+            RemoveDrawObjects();
 
-            foreach (var kvp in activeLines)
-            {
-                RemoveDrawObjectSafe(kvp.Value.TagRay);
-                RemoveDrawObjectSafe(kvp.Value.TagText);
-            }
-
+            // Limpia también la tabla de líneas activas
             activeLines.Clear();
         }
 
