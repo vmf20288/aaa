@@ -112,6 +112,14 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "Margen de ticks: borrar", GroupName = "Gestión de zonas", Order = 5)]
         public int MargenTicksBorre { get; set; }
 
+        [NinjaScriptProperty]
+        [Display(Name = "Reset session", GroupName = "Gestión de zonas", Order = 6)]
+        public bool ResetSession { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Show history", GroupName = "Gestión de zonas", Order = 7)]
+        public bool ShowHistory { get; set; }
+
         // Serie pública para lectura por otros scripts
         [Browsable(false), XmlIgnore]
         public Series<double> NivelExpuesto => nivelExpuesto;
@@ -137,6 +145,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 TimeFrameMin             = 5;
                 MinVelasConfirmacion     = 0;   // activación inmediata
                 MargenTicksBorre         = 6;   // v4: margen por defecto
+                ResetSession             = true;
+                ShowHistory              = false;
             }
             else if (State == State.Configure)
             {
@@ -158,7 +168,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         #region Lógica principal
         protected override void OnBarUpdate()
         {
-            if (BarsInProgress == 0 && Bars.IsFirstBarOfSession)
+            if (BarsInProgress == 0 && Bars.IsFirstBarOfSession && ResetSession)
                 ResetPorNuevaSesion();
 
             // v4: publicar siempre el último nivel activo/dibujado en la serie (en la serie principal)
@@ -398,7 +408,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             // v4: Etiqueta "VolCluster" encima de la línea (anclada al inicio) — overload simple (compat)
             double yLabel = Instrument.MasterInstrument.RoundToTickSize(cz.Level + 2 * TickSize);
-            Draw.Text(this, cz.Tag + "_lbl", "VolCluster", startBarsAgo, yLabel, color);
+            Draw.Text(this, cz.Tag + "_lbl", "VN", startBarsAgo, yLabel, color);
 
             // Estilo punteado / grosor si tu NT lo soporta (reflexión; no rompe si no existe)
             TryStyleRayWithReflection(ray, color, grosorLineaFijo);
@@ -407,6 +417,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         private void ConvertirEnHistorico(ClusterZone cz)
         {
             Brush color = cz.IsSupport ? soporteBrush : resistenciaBrush;
+            Brush lineColor = Brushes.LightGray;
 
             RemoveDrawObject(cz.Tag);
             RemoveDrawObject(cz.Tag + "_lbl");
@@ -423,10 +434,13 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (endBarsAgo < 0) endBarsAgo = 0;
             endBarsAgo = Math.Min(endBarsAgo, primaryCurrentBar);
 
-            var line = Draw.Line(this, cz.Tag + "_hist", startBarsAgo, cz.Level, endBarsAgo, cz.Level, color);
-            double yLabel = Instrument.MasterInstrument.RoundToTickSize(cz.Level + 2 * TickSize);
-            Draw.Text(this, cz.Tag + "_lbl_hist", "VolCluster", startBarsAgo, yLabel, color);
-            TryStyleRayWithReflection(line, color, grosorLineaFijo);
+            if (ShowHistory)
+            {
+                var line = Draw.Line(this, cz.Tag + "_hist", startBarsAgo, cz.Level, endBarsAgo, cz.Level, lineColor);
+                double yLabel = Instrument.MasterInstrument.RoundToTickSize(cz.Level + 2 * TickSize);
+                Draw.Text(this, cz.Tag + "_lbl_hist", "VN", startBarsAgo, yLabel, color);
+                TryStyleRayWithReflection(line, lineColor, grosorLineaFijo);
+            }
 
             if (!historical.Contains(cz))
                 historical.Add(cz);
@@ -445,7 +459,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 var dashProp = t.GetProperty("DashStyleHelper");
                 if (dashProp != null && dashProp.PropertyType.IsEnum)
                 {
-                    object dot = Enum.Parse(dashProp.PropertyType, "Dot", true);
+                    object dot = Enum.Parse(dashProp.PropertyType, "DashDot", true);
                     dashProp.SetValue(ray, dot, null);
                 }
 
@@ -470,7 +484,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                             var ctor3 = strokeType.GetConstructor(new Type[] { typeof(Brush), dashType, typeof(int) });
                             if (ctor3 != null)
                             {
-                                object dot = Enum.Parse(dashType, "Dot", true);
+                                object dot = Enum.Parse(dashType, "DashDot", true);
                                 strokeObj = ctor3.Invoke(new object[] { color, dot, width });
                             }
                         }
