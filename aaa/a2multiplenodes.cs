@@ -111,6 +111,10 @@ namespace NinjaTrader.NinjaScript.Indicators
         public NinjaTrader.NinjaScript.CloseSource CierreParaBorrar { get; set; } = NinjaTrader.NinjaScript.CloseSource.OneMinute;
 
         [NinjaScriptProperty]
+        [Display(Name = "Show history", GroupName = "Gestión de niveles", Order = 14)]
+        public bool ShowHistory { get; set; } = false;
+
+        [NinjaScriptProperty]
         [Display(Name = "Restart session (limpiar al inicio)", GroupName = "Gestión de niveles", Order = 13)]
         public bool RestartSession { get; set; } = true;
         #endregion
@@ -154,6 +158,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 // Visible
                 ToleranciaTicks   = 6;
+                ShowHistory       = false;
                 RestartSession    = true;
             }
             else if (State == State.Configure)
@@ -391,7 +396,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             Draw.Ray(this, lvl.Tag, lvl.StartTime, lvl.Price, lvl.StartTime.AddMinutes(1), lvl.Price, brush, DashStyleHelper.Solid, 2);
 
             // Etiqueta cerca del inicio
-            Draw.Text(this, lvl.Tag + "_label", false, "multiple node",
+            Draw.Text(this, lvl.Tag + "_label", false, "X",
                       lvl.StartTime, lvl.Price + 2 * tickSize, 0,
                       brush, labelFont, TextAlignment.Left,
                       Brushes.Transparent, Brushes.Transparent, 0);
@@ -401,7 +406,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             Draw.Ray(this, lvl.Tag, lvl.StartTime, lvl.Price, lvl.StartTime.AddMinutes(1), lvl.Price, brush, DashStyleHelper.Solid, 2);
 
-            Draw.Text(this, lvl.Tag + "_label", false, "multiple node",
+            Draw.Text(this, lvl.Tag + "_label", false, "X",
                       lvl.StartTime, lvl.Price + 2 * tickSize, 0,
                       brush, labelFont, TextAlignment.Left,
                       Brushes.Transparent, Brushes.Transparent, 0);
@@ -412,18 +417,21 @@ namespace NinjaTrader.NinjaScript.Indicators
             RemoveDrawObject(lvl.Tag);
             RemoveDrawObject(lvl.Tag + "_label");
 
-            Brush brush = Brushes.Gold;
+            Brush textBrush = Brushes.Gold;
             if (lvl.State == NodeState.Demand)
-                brush = Brushes.LimeGreen;
+                textBrush = Brushes.LimeGreen;
             else if (lvl.State == NodeState.Supply)
-                brush = Brushes.Red;
+                textBrush = Brushes.Red;
 
-            Draw.Line(this, lvl.Tag + "_hist", false, lvl.StartTime, lvl.Price, endTime, lvl.Price, brush, DashStyleHelper.Solid, 2);
+            if (ShowHistory)
+            {
+                Draw.Line(this, lvl.Tag + "_hist", false, lvl.StartTime, lvl.Price, endTime, lvl.Price, Brushes.LightGray, DashStyleHelper.Solid, 2);
 
-            Draw.Text(this, lvl.Tag + "_hist_label", false, "multiple node",
-                      lvl.StartTime, lvl.Price + 2 * tickSize, 0,
-                      brush, labelFont, TextAlignment.Left,
-                      Brushes.Transparent, Brushes.Transparent, 0);
+                Draw.Text(this, lvl.Tag + "_hist_label", false, "X",
+                          lvl.StartTime, lvl.Price + 2 * tickSize, 0,
+                          textBrush, labelFont, TextAlignment.Left,
+                          Brushes.Transparent, Brushes.Transparent, 0);
+            }
 
             lvl.InvalidationTime = endTime;
             lvl.Active = false;
