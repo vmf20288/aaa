@@ -227,14 +227,14 @@ namespace NinjaTrader.NinjaScript.Indicators
                 PaintPriceMarkers        = false;
                 IsSuspendedWhileInactive = false;
 
-                MinTrade         = 25;
+                MinTrade         = 75;
                 ToleranciaTicks  = 8;
                 ClusterWindowMs  = 300;
                 DriftTicks       = 2;
                 UseAlMenos       = true;
                 AlMenosMinTrade  = 10;
                 UseMinPrint      = true;
-                MinPrintVol      = 2;
+                MinPrintVol      = 5;
 
                 AddPlot(Brushes.Transparent, "LastMinTradeVolume");
                 AddPlot(Brushes.Transparent, "LastMinTradePrice");
