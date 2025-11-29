@@ -58,6 +58,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 StackImbalance = 3; // niveles consecutivos
                 ToleranciaBorrarTicks = 6; // ticks
                 FiltroSupervivencia = false;
+                SessionReset = true;
+                ShowHistory = false;
             }
             else if (State == State.Configure)
             {
@@ -128,7 +130,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             // 2) Borrado por sesión e invalidez en la serie primaria
             if (BarsInProgress == 0)
             {
-                if (Bars != null && Bars.IsFirstBarOfSession)
+                if (SessionReset && Bars != null && Bars.IsFirstBarOfSession)
                     ClearAllStackLines();
 
                 EnsureSurvivalCutoffTime();
@@ -292,9 +294,12 @@ namespace NinjaTrader.NinjaScript.Indicators
             // Re-dibujo (crear o actualizar el mismo tag) — dos puntos con la MISMA Y => HORIZONTAL
             var ray = Draw.Ray(this, tagRay, startBarsAgo, midPrice, endBarsAgo, midPrice, brush);
             if (ray != null && ray.Stroke != null)
+            {
                 ray.Stroke.Width = 2;
+                ray.Stroke.DashStyleHelper = NinjaTrader.Gui.DashStyleHelper.Dash;
+            }
 
-            Draw.Text(this, tagText, "Stack Imbalance", startBarsAgo, midPrice, brush);
+            Draw.Text(this, tagText, "IM", startBarsAgo, midPrice, brush);
 
             // Memoria/estado del stack
             if (!activeLines.TryGetValue(tagRay, out var infoNew))
@@ -358,6 +363,14 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (!activeLines.TryGetValue(tagRay, out var info))
                 return;
 
+            if (!ShowHistory)
+            {
+                RemoveDrawObjectSafe(info.TagRay);
+                RemoveDrawObjectSafe(info.TagText);
+                activeLines.Remove(tagRay);
+                return;
+            }
+
             int originIndex = info.OriginPrimaryIndex;
             if (originIndex < 0)
                 originIndex = GetPrimaryIndex(info.BarTime);
@@ -375,16 +388,21 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (startBarsAgo <= endBarsAgo && CurrentBars[0] >= 1)
                 startBarsAgo = 1;
 
-            Brush brush = info.IsAskStack ? Brushes.LimeGreen : Brushes.Red;
+            Brush brush = Brushes.LightGray;
 
             // reemplazar el Ray infinito por una línea fija hasta el bar que invalida
             RemoveDrawObjectSafe(info.TagRay);
             string finalTag = $"{info.TagRay}_final";
             var line = Draw.Line(this, finalTag, startBarsAgo, info.Price, endBarsAgo, info.Price, brush);
             if (line != null && line.Stroke != null)
+            {
                 line.Stroke.Width = 2;
+                line.Stroke.DashStyleHelper = NinjaTrader.Gui.DashStyleHelper.Dash;
+            }
 
             RemoveDrawObjectSafe(info.TagText);
+            string finalTextTag = $"{info.TagText}_final";
+            Draw.Text(this, finalTextTag, "IM", startBarsAgo, info.Price, brush);
             activeLines.Remove(tagRay);
         }
 
@@ -463,6 +481,14 @@ namespace NinjaTrader.NinjaScript.Indicators
         [NinjaScriptProperty]
         [Display(Name = "Filtro de supervivencia", GroupName = "Parámetros", Order = 6)]
         public bool FiltroSupervivencia { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Session reset", GroupName = "Parámetros", Order = 7)]
+        public bool SessionReset { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Show history", GroupName = "Parámetros", Order = 8)]
+        public bool ShowHistory { get; set; }
         #endregion
     }
 }
