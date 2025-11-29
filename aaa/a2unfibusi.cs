@@ -248,8 +248,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             levels.Add(lvl);
             levelsByKey[key] = lvl;
 
-            // Dibuja inmediatamente con extremo derecho en la última barra del primario (si existe)
-            DateTime endTime = (CurrentBars[0] >= 0) ? Times[0][0] : detectedTime;
+            // Dibuja inmediatamente con extremo derecho extendido hacia la derecha del gráfico
+            DateTime baseEndTime = (CurrentBars[0] >= 0) ? Times[0][0] : detectedTime;
+            DateTime endTime     = baseEndTime.AddDays(365);
             DrawLevelLine(lvl, detectedTime, endTime);
             DrawLevelText(lvl);
         }
@@ -277,17 +278,20 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private void DrawLevelText(UBLevel lvl)
         {
-            // Texto "unfibusi" ligeramente por encima de la línea
+            // Texto "UB" ligeramente por encima de la línea
             double y = lvl.Price + TextOffsetTicks * TickSize;
             Brush  b = lvl.IsHigh ? brushHigh : brushLow;
 
-            Draw.Text(this, lvl.TagText, false, "unfibusi",
+            Draw.Text(this, lvl.TagText, false, "UB",
                       lvl.DetectedTime, y, 0, b, textFont, System.Windows.TextAlignment.Left, null, null, 0);
         }
 
-        private void ExtendLinesToRightEdge(DateTime endTime)
+        private void ExtendLinesToRightEdge(DateTime lastPrimaryBarTime)
         {
-            // Redibuja con el mismo tag para "mover" el extremo derecho a la última barra del primario
+            // Extiende el extremo derecho un poco más allá de la última barra del primario
+            DateTime endTime = lastPrimaryBarTime.AddDays(365);
+
+            // Redibuja con el mismo tag para "mover" el extremo derecho
             foreach (var lvl in levels)
                 DrawLevelLine(lvl, lvl.DetectedTime, endTime);
         }
@@ -375,60 +379,59 @@ namespace NinjaTrader.NinjaScript.Indicators
     }
 }
 
-
 #region NinjaScript generated code. Neither change nor remove.
 
 namespace NinjaTrader.NinjaScript.Indicators
 {
-public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
-{
-private a2unfibusi[] cachea2unfibusi;
-public a2unfibusi a2unfibusi(int frameBaseTimeMinutes, int minOppositeVolume, bool resetAtSessionStart)
-{
-return a2unfibusi(Input, frameBaseTimeMinutes, minOppositeVolume, resetAtSessionStart);
-}
+	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
+	{
+		private a2unfibusi[] cachea2unfibusi;
+		public a2unfibusi a2unfibusi(int frameBaseTimeMinutes, int minOppositeVolume)
+		{
+			return a2unfibusi(Input, frameBaseTimeMinutes, minOppositeVolume);
+		}
 
-public a2unfibusi a2unfibusi(ISeries<double> input, int frameBaseTimeMinutes, int minOppositeVolume, bool resetAtSessionStart)
-{
-if (cachea2unfibusi != null)
-for (int idx = 0; idx < cachea2unfibusi.Length; idx++)
-if (cachea2unfibusi[idx] != null && cachea2unfibusi[idx].FrameBaseTimeMinutes == frameBaseTimeMinutes && cachea2unfibusi[idx].MinOppositeVolume == minOppositeVolume && cachea2unfibusi[idx].ResetAtSessionStart == resetAtSessionStart && cachea2unfibusi[idx].EqualsInput(input))
-return cachea2unfibusi[idx];
-return CacheIndicator<a2unfibusi>(new a2unfibusi(){ FrameBaseTimeMinutes = frameBaseTimeMinutes, MinOppositeVolume = minOppositeVolume, ResetAtSessionStart = resetAtSessionStart }, input, ref cachea2unfibusi);
-}
-}
+		public a2unfibusi a2unfibusi(ISeries<double> input, int frameBaseTimeMinutes, int minOppositeVolume)
+		{
+			if (cachea2unfibusi != null)
+				for (int idx = 0; idx < cachea2unfibusi.Length; idx++)
+					if (cachea2unfibusi[idx] != null && cachea2unfibusi[idx].FrameBaseTimeMinutes == frameBaseTimeMinutes && cachea2unfibusi[idx].MinOppositeVolume == minOppositeVolume && cachea2unfibusi[idx].EqualsInput(input))
+						return cachea2unfibusi[idx];
+			return CacheIndicator<a2unfibusi>(new a2unfibusi(){ FrameBaseTimeMinutes = frameBaseTimeMinutes, MinOppositeVolume = minOppositeVolume }, input, ref cachea2unfibusi);
+		}
+	}
 }
 
 namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
-public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
-{
-public Indicators.a2unfibusi a2unfibusi(int frameBaseTimeMinutes, int minOppositeVolume, bool resetAtSessionStart)
-{
-return indicator.a2unfibusi(Input, frameBaseTimeMinutes, minOppositeVolume, resetAtSessionStart);
-}
+	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
+	{
+		public Indicators.a2unfibusi a2unfibusi(int frameBaseTimeMinutes, int minOppositeVolume)
+		{
+			return indicator.a2unfibusi(Input, frameBaseTimeMinutes, minOppositeVolume);
+		}
 
-public Indicators.a2unfibusi a2unfibusi(ISeries<double> input , int frameBaseTimeMinutes, int minOppositeVolume, bool resetAtSessionStart)
-{
-return indicator.a2unfibusi(input, frameBaseTimeMinutes, minOppositeVolume, resetAtSessionStart);
-}
-}
+		public Indicators.a2unfibusi a2unfibusi(ISeries<double> input , int frameBaseTimeMinutes, int minOppositeVolume)
+		{
+			return indicator.a2unfibusi(input, frameBaseTimeMinutes, minOppositeVolume);
+		}
+	}
 }
 
 namespace NinjaTrader.NinjaScript.Strategies
 {
-public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
-{
-public Indicators.a2unfibusi a2unfibusi(int frameBaseTimeMinutes, int minOppositeVolume, bool resetAtSessionStart)
-{
-return indicator.a2unfibusi(Input, frameBaseTimeMinutes, minOppositeVolume, resetAtSessionStart);
-}
+	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
+	{
+		public Indicators.a2unfibusi a2unfibusi(int frameBaseTimeMinutes, int minOppositeVolume)
+		{
+			return indicator.a2unfibusi(Input, frameBaseTimeMinutes, minOppositeVolume);
+		}
 
-public Indicators.a2unfibusi a2unfibusi(ISeries<double> input , int frameBaseTimeMinutes, int minOppositeVolume, bool resetAtSessionStart)
-{
-return indicator.a2unfibusi(input, frameBaseTimeMinutes, minOppositeVolume, resetAtSessionStart);
-}
-}
+		public Indicators.a2unfibusi a2unfibusi(ISeries<double> input , int frameBaseTimeMinutes, int minOppositeVolume)
+		{
+			return indicator.a2unfibusi(input, frameBaseTimeMinutes, minOppositeVolume);
+		}
+	}
 }
 
 #endregion
