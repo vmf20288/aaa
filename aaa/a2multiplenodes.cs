@@ -150,7 +150,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 // Fijamos defaults (y los ocultos se mantienen ocultos)
                 VelasTimeFrameMin = 5;
-                VentanaMin        = 25;
+                VentanaMin        = 15;
                 TicksAlrededor    = 6;
 
                 // Ocultos (fijos)
