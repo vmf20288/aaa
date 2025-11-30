@@ -71,6 +71,8 @@ namespace NinjaTrader.NinjaScript.Indicators
             public NodeState State;
             public bool Active;
             public DateTime? InvalidationTime;
+            public int HitCount;
+            public DateTime? LastClusterTime;
         }
         #endregion
 
@@ -215,8 +217,30 @@ namespace NinjaTrader.NinjaScript.Indicators
                 var clusters = GetClusterLevels(pocs);
                 foreach (double levelPrice in clusters)
                 {
-                    if (!HasActiveLevelNear(levelPrice))
+                    var existing = activeLevels.FirstOrDefault(x => x.InvalidationTime == null && Math.Abs(x.Price - levelPrice) <= DedupTolerance);
+
+                    if (existing != null)
+                    {
+                        if (existing.LastClusterTime != Times[bipVol][0])
+                        {
+                            existing.HitCount++;
+                            existing.LastClusterTime = Times[bipVol][0];
+                        }
+
+                        if (!existing.Active)
+                        {
+                            existing.Active = true;
+                            existing.StartTime = Times[bipVol][0];
+                            existing.NextMinuteCloseTime = existing.StartTime.AddMinutes(1);
+                            existing.State = NodeState.Pending;
+                        }
+
+                        RecolorLevel(existing, GetStateBrush(existing.State));
+                    }
+                    else
+                    {
                         CreateLevel(levelPrice, Times[bipVol][0]);
+                    }
                 }
 
                 // Cancelar niveles pendientes que ya no estén soportados por un cluster actual
@@ -224,10 +248,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 {
                     bool hasCluster = clusters.Any(c => Math.Abs(c - lvl.Price) <= DedupTolerance);
                     if (!hasCluster)
-                    {
                         DeleteLevel(lvl);
-                        activeLevels.Remove(lvl);
-                    }
                 }
             }
             // --- 2) Serie 1m: clasificar y (si aplica) borrar por cierre=1m (con tolerancia direccional v6)
@@ -394,7 +415,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                 NextMinuteCloseTime = startTime.AddMinutes(1),
                 State               = NodeState.Pending,
                 Active              = true,
-                Tag                 = $"{tagPrefix}_{++uniqueId}_{(long)Math.Round(price / tickSize)}"
+                Tag                 = $"{tagPrefix}_{++uniqueId}_{(long)Math.Round(price / tickSize)}",
+                HitCount            = 1,
+                LastClusterTime     = startTime
             };
 
             activeLevels.Add(lvl);
@@ -403,11 +426,12 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private void DrawLevel(Level lvl, Brush brush)
         {
+            string labelText = GetLabelText(lvl);
             // Ray horizontal desde el tiempo de creación hacia la derecha
             Draw.Ray(this, lvl.Tag, lvl.StartTime, lvl.Price, lvl.StartTime.AddMinutes(1), lvl.Price, brush, DashStyleHelper.Solid, 2);
 
             // Etiqueta cerca del inicio
-            Draw.Text(this, lvl.Tag + "_label", false, "X",
+            Draw.Text(this, lvl.Tag + "_label", false, labelText,
                       lvl.StartTime, lvl.Price + 2 * tickSize, 0,
                       brush, labelFont, TextAlignment.Left,
                       Brushes.Transparent, Brushes.Transparent, 0);
@@ -415,9 +439,10 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private void RecolorLevel(Level lvl, Brush brush)
         {
+            string labelText = GetLabelText(lvl);
             Draw.Ray(this, lvl.Tag, lvl.StartTime, lvl.Price, lvl.StartTime.AddMinutes(1), lvl.Price, brush, DashStyleHelper.Solid, 2);
 
-            Draw.Text(this, lvl.Tag + "_label", false, "X",
+            Draw.Text(this, lvl.Tag + "_label", false, labelText,
                       lvl.StartTime, lvl.Price + 2 * tickSize, 0,
                       brush, labelFont, TextAlignment.Left,
                       Brushes.Transparent, Brushes.Transparent, 0);
@@ -438,7 +463,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 Draw.Line(this, lvl.Tag + "_hist", false, lvl.StartTime, lvl.Price, endTime, lvl.Price, Brushes.LightGray, DashStyleHelper.Solid, 2);
 
-                Draw.Text(this, lvl.Tag + "_hist_label", false, "X",
+                Draw.Text(this, lvl.Tag + "_hist_label", false, GetLabelText(lvl),
                           lvl.StartTime, lvl.Price + 2 * tickSize, 0,
                           textBrush, labelFont, TextAlignment.Left,
                           Brushes.Transparent, Brushes.Transparent, 0);
@@ -466,6 +491,20 @@ namespace NinjaTrader.NinjaScript.Indicators
             bool crossDown = lastClose < levelPrice && prevClose > levelPrice;
             bool crossUp   = lastClose > levelPrice && prevClose < levelPrice;
             return crossDown || crossUp;
+        }
+
+        private Brush GetStateBrush(NodeState state)
+        {
+            if (state == NodeState.Demand)
+                return Brushes.LimeGreen;
+            if (state == NodeState.Supply)
+                return Brushes.Red;
+            return Brushes.Gold;
+        }
+
+        private string GetLabelText(Level lvl)
+        {
+            return (lvl?.HitCount ?? 0) >= 2 ? "X M" : "X";
         }
         #endregion
     }
