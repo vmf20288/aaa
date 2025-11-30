@@ -218,6 +218,17 @@ namespace NinjaTrader.NinjaScript.Indicators
                     if (!HasActiveLevelNear(levelPrice))
                         CreateLevel(levelPrice, Times[bipVol][0]);
                 }
+
+                // Cancelar niveles pendientes que ya no estén soportados por un cluster actual
+                foreach (var lvl in activeLevels.Where(x => x.Active && x.State == NodeState.Pending).ToList())
+                {
+                    bool hasCluster = clusters.Any(c => Math.Abs(c - lvl.Price) <= DedupTolerance);
+                    if (!hasCluster)
+                    {
+                        DeleteLevel(lvl);
+                        activeLevels.Remove(lvl);
+                    }
+                }
             }
             // --- 2) Serie 1m: clasificar y (si aplica) borrar por cierre=1m (con tolerancia direccional v6)
             else if (BarsInProgress == bipOneMinute)
