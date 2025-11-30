@@ -349,6 +349,38 @@ namespace NinjaTrader.NinjaScript.Indicators
                             InvalidateLevel(lvl, Times[0][1]);
                     }
                 }
+
+                // Confirmación adicional al cierre de la vela primaria (p. ej., 5m)
+                if (IsFirstTickOfBar && CurrentBar > 0)
+                {
+                    var vbt = BarsArray[bipVol].BarsType as VolumetricBarsType;
+                    if (vbt == null)
+                        return;
+
+                    int barrasVentana = Math.Max(1, VentanaMin / Math.Max(1, VelasTimeFrameMin));
+                    int disponibles   = Math.Min(barrasVentana, BarsArray[bipVol].CurrentBar + 1);
+
+                    var pocs = new List<double>(disponibles);
+                    for (int i = 0; i < disponibles; i++)
+                    {
+                        int absIndex = BarsArray[bipVol].CurrentBar - i;
+                        if (absIndex < 0) break;
+
+                        double pocPrice;
+                        vbt.Volumes[absIndex].GetMaximumVolume(null, out pocPrice);
+                        if (!double.IsNaN(pocPrice) && pocPrice > 0)
+                            pocs.Add(Instrument.MasterInstrument.RoundToTickSize(pocPrice));
+                    }
+
+                    var clusters = GetClusterLevels(pocs);
+
+                    foreach (var lvl in activeLevels.Where(x => x.State == NodeState.Pending).ToList())
+                    {
+                        bool hasCluster = clusters.Any(c => Math.Abs(c - lvl.Price) <= DedupTolerance);
+                        if (!hasCluster)
+                            DeleteLevel(lvl);
+                    }
+                }
             }
         }
         #endregion
