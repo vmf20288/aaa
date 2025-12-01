@@ -6,8 +6,8 @@ using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Windows.Media;
 using SharpDX;
-using SharpDX.Direct2D1;
 using SharpDX.DirectWrite;
+using D2D1 = SharpDX.Direct2D1;
 using NinjaTrader.Cbi;
 using NinjaTrader.Core.FloatingPoint;
 using NinjaTrader.Data;
@@ -290,7 +290,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         #endregion
 
         #region Render
-        public override void OnRender(ChartControl chartControl, ChartScale chartScale)
+        protected override void OnRender(ChartControl chartControl, ChartScale chartScale)
         {
             base.OnRender(chartControl, chartScale);
 
@@ -311,14 +311,14 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             SharpDX.RectangleF backgroundRect = new SharpDX.RectangleF(panel.X, top, panel.W, totalHeight);
 
-            RenderTarget rt = chartControl.DxRenderTarget;
+            var rt = RenderTarget;
             if (rt == null)
                 return;
 
-            using (var bgBrush = new SolidColorBrush(rt, new SharpDX.Color(10, 10, 10, 200)))
-            using (var gridBrush = new SolidColorBrush(rt, new SharpDX.Color(200, 200, 200, 120)))
-            using (var textBrush = new SolidColorBrush(rt, new SharpDX.Color(200, 200, 200, 180)))
-            using (var textFormat = new TextFormat(Core.Globals.DirectWriteFactory, chartControl.Properties.ChartFont.FamilyName, chartControl.Properties.ChartFont.Size - 1))
+            using (var bgBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(10, 10, 10, 200)))
+            using (var gridBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(200, 200, 200, 120)))
+            using (var textBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(200, 200, 200, 180)))
+            using (var textFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 12f))
             {
                 rt.FillRectangle(backgroundRect, bgBrush);
 
@@ -364,12 +364,12 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
         }
 
-        private void DrawTriangle(RenderTarget rt, float centerX, float centerY, float size, bool pointingUp, SharpDX.Color color)
+        private void DrawTriangle(D2D1.RenderTarget rt, float centerX, float centerY, float size, bool pointingUp, SharpDX.Color color)
         {
-            using (var brush = new SolidColorBrush(rt, color))
-            using (var geometry = new PathGeometry(rt.Factory))
+            using (var brush = new D2D1.SolidColorBrush(rt, color))
+            using (var geometry = new D2D1.PathGeometry(rt.Factory))
             {
-                using (GeometrySink sink = geometry.Open())
+                using (D2D1.GeometrySink sink = geometry.Open())
                 {
                     Vector2 p1 = new Vector2(centerX, pointingUp ? centerY - size : centerY + size);
                     Vector2 p2 = new Vector2(centerX - size, pointingUp ? centerY + size : centerY - size);
