@@ -375,10 +375,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                     Vector2 p2 = new Vector2(centerX - size, pointingUp ? centerY + size : centerY - size);
                     Vector2 p3 = new Vector2(centerX + size, pointingUp ? centerY + size : centerY - size);
 
-                    sink.BeginFigure(p1, FigureBegin.Filled);
+                    sink.BeginFigure(p1, D2D1.FigureBegin.Filled);
                     sink.AddLine(p2);
                     sink.AddLine(p3);
-                    sink.EndFigure(FigureEnd.Closed);
+                    sink.EndFigure(D2D1.FigureEnd.Closed);
                     sink.Close();
                 }
 
