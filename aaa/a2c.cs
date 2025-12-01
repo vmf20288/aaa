@@ -24,6 +24,7 @@ namespace NinjaTrader.NinjaScript.Indicators
     {
         #region Constantes y campos privados
         private const int BaselineLookbackBars = 14;
+        private const int AbsBaselineLookbackBars = 14;
 
         private int volBip = -1;
         private VolumetricBarsType volBarsType;
@@ -31,9 +32,12 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private readonly List<long> histMaxAsk = new List<long>();
         private readonly List<long> histMaxBid = new List<long>();
+        private readonly List<long> histHVNTotal = new List<long>();
 
         private readonly HashSet<string> emittedSignals = new HashSet<string>();
+        private readonly HashSet<string> absorptionEmittedSignals = new HashSet<string>();
         private readonly Dictionary<int, int> orderLimitSignalsByBar = new Dictionary<int, int>();
+        private readonly Dictionary<int, int> absorptionSignalsByBar = new Dictionary<int, int>();
         #endregion
 
         #region OnStateChange
@@ -55,6 +59,10 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 MultiplyVolume = 2.5;
                 MinContracts = 100;
+
+                AbsMultiplyVolume = 2.0;
+                AbsMinContracts = 150;
+                AbsMinSideShare = 0.25;
             }
             else if (State == State.Configure)
             {
@@ -144,8 +152,16 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             UpdateBaseline(maxBid, maxAsk);
 
+            bool hvnFound = TryGetHighVolumeNode(volBarIndex, out long hvnTotal, out double priceHVN, out long bidHVN, out long askHVN);
+
+            if (hvnFound)
+                UpdateAbsorptionBaseline(hvnTotal);
+
             if (!ShowHistory && isHistorical)
                 return;
+
+            if (hvnFound)
+                EvaluateAndStoreAbsorption(volBarTime, volBarIndex, hvnTotal, priceHVN, bidHVN, askHVN, isHistorical);
 
             EvaluateAndDraw(volBarTime, volBarIndex, maxBid, maxBidPrice, maxAsk, maxAskPrice, isHistorical);
         }
@@ -159,6 +175,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                 return;
 
             EvaluateAndDraw(volBarTime, volBarIndex, maxBid, maxBidPrice, maxAsk, maxAskPrice, false);
+
+            if (TryGetHighVolumeNode(volBarIndex, out long hvnTotal, out double priceHVN, out long bidHVN, out long askHVN))
+                EvaluateAndStoreAbsorption(volBarTime, volBarIndex, hvnTotal, priceHVN, bidHVN, askHVN, false);
         }
 
         private bool TryGetMaxVolumes(int volBarIndex, out long maxBid, out double maxBidPrice, out long maxAsk, out double maxAskPrice)
@@ -209,6 +228,52 @@ namespace NinjaTrader.NinjaScript.Indicators
             return maxBid > 0 || maxAsk > 0;
         }
 
+        private bool TryGetHighVolumeNode(int volBarIndex, out long totalHVN, out double priceHVN, out long bidHVN, out long askHVN)
+        {
+            totalHVN = 0;
+            priceHVN = double.NaN;
+            bidHVN = 0;
+            askHVN = 0;
+
+            if (volBarIndex < 0 || volBarsType == null)
+                return false;
+
+            int barsAgo = CurrentBars[volBip] - volBarIndex;
+            if (barsAgo < 0 || barsAgo >= BarsArray[volBip].Count)
+                return false;
+
+            double low = Lows[volBip][barsAgo];
+            double high = Highs[volBip][barsAgo];
+
+            if (high < low)
+            {
+                double t = high;
+                high = low;
+                low = t;
+            }
+
+            int priceLevels = Math.Max(1, (int)Math.Round((high - low) / volTickSize)) + 1;
+
+            for (int level = 0; level < priceLevels; level++)
+            {
+                double price = Instrument.MasterInstrument.RoundToTickSize(low + level * volTickSize);
+                long bidVol = volBarsType.Volumes[volBarIndex].GetBidVolumeForPrice(price);
+                long askVol = volBarsType.Volumes[volBarIndex].GetAskVolumeForPrice(price);
+
+                long total = bidVol + askVol;
+
+                if (total > totalHVN)
+                {
+                    totalHVN = total;
+                    priceHVN = price;
+                    bidHVN = bidVol;
+                    askHVN = askVol;
+                }
+            }
+
+            return totalHVN > 0 && !double.IsNaN(priceHVN);
+        }
+
         private void EvaluateAndDraw(DateTime volBarTime, int volBarIndex, long maxBid, double maxBidPrice, long maxAsk, double maxAskPrice, bool isHistorical)
         {
             double baselineBid = ComputeMedian(histMaxBid);
@@ -222,6 +287,57 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             if (maxAsk >= thresholdAsk && !double.IsNaN(maxAskPrice))
                 TryDrawSignal(volBarTime, volBarIndex, maxAskPrice, false, isHistorical);
+        }
+
+        private void EvaluateAndStoreAbsorption(DateTime volBarTime, int volBarIndex, long hvnTotal, double priceHVN, long bidHVN, long askHVN, bool isHistorical)
+        {
+            double baselineHVN = ComputeMedian(histHVNTotal);
+
+            if (baselineHVN <= 0)
+                return;
+
+            double thresholdAbs = Math.Max(AbsMultiplyVolume * baselineHVN, AbsMinContracts);
+
+            if (hvnTotal < thresholdAbs)
+                return;
+
+            double bidShare = hvnTotal > 0 ? (double)bidHVN / hvnTotal : 0.0;
+            double askShare = hvnTotal > 0 ? (double)askHVN / hvnTotal : 0.0;
+            double minShare = Math.Min(bidShare, askShare);
+
+            if (minShare < AbsMinSideShare)
+                return;
+
+            if (isHistorical && !ShowHistory)
+                return;
+
+            int primaryBar = BarsArray[0].GetBar(volBarTime);
+            if (primaryBar < 0 || primaryBar > CurrentBars[0])
+                return;
+
+            int side = 0;
+            if (askHVN > bidHVN)
+                side = 1;
+            else if (bidHVN > askHVN)
+                side = -1;
+
+            absorptionSignalsByBar[primaryBar] = side;
+
+            string key = $"{volBarTime.Ticks}:{side}";
+            if (!absorptionEmittedSignals.Contains(key))
+            {
+                int barsAgo = CurrentBars[0] - primaryBar;
+                bool pointingUp = side <= 0;
+                Brush brush = isHistorical ? Brushes.LightGray : (side > 0 ? Brushes.OrangeRed : Brushes.ForestGreen);
+                string tag = $"a2c_ABS_{volBarTime.Ticks}";
+
+                if (pointingUp)
+                    Draw.TriangleUp(this, tag, false, barsAgo, priceHVN, brush);
+                else
+                    Draw.TriangleDown(this, tag, false, barsAgo, priceHVN, brush);
+
+                absorptionEmittedSignals.Add(key);
+            }
         }
 
         private void TryDrawSignal(DateTime volBarTime, int volBarIndex, double price, bool isBidSide, bool isHistorical)
@@ -264,6 +380,17 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
         }
 
+        private void UpdateAbsorptionBaseline(long hvnTotal)
+        {
+            if (hvnTotal <= 0)
+                return;
+
+            histHVNTotal.Add(hvnTotal);
+
+            if (histHVNTotal.Count > AbsBaselineLookbackBars)
+                histHVNTotal.RemoveAt(0);
+        }
+
         private double ComputeMedian(List<long> data)
         {
             if (data.Count == 0)
@@ -283,8 +410,11 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             histMaxAsk.Clear();
             histMaxBid.Clear();
+            histHVNTotal.Clear();
             emittedSignals.Clear();
+            absorptionEmittedSignals.Clear();
             orderLimitSignalsByBar.Clear();
+            absorptionSignalsByBar.Clear();
             RemoveDrawObjects();
         }
         #endregion
@@ -344,11 +474,22 @@ namespace NinjaTrader.NinjaScript.Indicators
                     rt.DrawTextLayout(new SharpDX.Vector2(textX, textY), layout, textBrush);
                 }
 
+                SharpDX.RectangleF absorptionRect = new SharpDX.RectangleF(panel.X, firstLineY + rowHeight, panel.W, rowHeight);
+                string absorptionLabel = "Absorption";
+                using (var layout = new TextLayout(Core.Globals.DirectWriteFactory, absorptionLabel, textFormat, absorptionRect.Width, rowHeight))
+                {
+                    float textX = panel.X + panel.W - layout.Metrics.Width - 6f;
+                    float textY = absorptionRect.Y + (rowHeight - layout.Metrics.Height) / 2f;
+                    rt.DrawTextLayout(new SharpDX.Vector2(textX, textY), layout, textBrush);
+                }
+
                 int startBar = Math.Max(ChartBars.FromIndex, 0);
                 int endBar = Math.Min(ChartBars.ToIndex, Bars.Count - 1);
 
                 float triangleSize = 5f;
-                float rowMiddle = firstLineY + rowHeight / 2f;
+                float row1Middle = firstLineY + rowHeight / 2f;
+                float row2Top = firstLineY + rowHeight * 1f;
+                float row2Middle = row2Top + rowHeight / 2f;
 
                 for (int barIndex = startBar; barIndex <= endBar; barIndex++)
                 {
@@ -359,7 +500,20 @@ namespace NinjaTrader.NinjaScript.Indicators
                     bool isBidSide = side > 0;
                     SharpDX.Color color = isBidSide ? new SharpDX.Color(34, 139, 34) : new SharpDX.Color(255, 102, 0);
 
-                    DrawTriangle(rt, x, rowMiddle, triangleSize, isBidSide, color);
+                    DrawTriangle(rt, x, row1Middle, triangleSize, isBidSide, color);
+                }
+
+                for (int barIndex = startBar; barIndex <= endBar; barIndex++)
+                {
+                    if (!absorptionSignalsByBar.TryGetValue(barIndex, out int side))
+                        continue;
+
+                    float x = (float)chartControl.GetXByBarIndex(ChartBars, barIndex);
+                    bool isBidSideAbs = side < 0;
+                    bool pointingUp = isBidSideAbs;
+                    SharpDX.Color color = side > 0 ? new SharpDX.Color(255, 102, 0) : new SharpDX.Color(34, 139, 34);
+
+                    DrawTriangle(rt, x, row2Middle, triangleSize, pointingUp, color);
                 }
             }
         }
@@ -410,6 +564,21 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Range(1, int.MaxValue)]
         [Display(Name = "Min contratos", Description = "Mínimo absoluto de contratos para señal", Order = 1, GroupName = "Limit Order")]
         public int MinContracts { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1.0, 10.0)]
+        [Display(Name = "Absorption - multiplicar volumen", Description = "Factor multiplicador del baseline de HVN", Order = 0, GroupName = "Absorption")]
+        public double AbsMultiplyVolume { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "Absorption - min contratos", Description = "Mínimo absoluto de contratos en el HVN", Order = 1, GroupName = "Absorption")]
+        public int AbsMinContracts { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0.0, 0.5)]
+        [Display(Name = "Absorption - min % por lado", Description = "Mínimo porcentaje que debe tener cada lado (Bid/Ask) del total en el HVN", Order = 2, GroupName = "Absorption")]
+        public double AbsMinSideShare { get; set; }
         #endregion
     }
 }
