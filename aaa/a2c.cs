@@ -30,6 +30,10 @@ namespace NinjaTrader.NinjaScript.Indicators
         private VolumetricBarsType volBarsType;
         private double volTickSize = 0;
 
+        private int divBip = -1;
+        private VolumetricBarsType divVolBarsType;
+        private readonly List<double> cumDeltaDiv = new List<double>();
+
         private readonly List<long> histMaxAsk = new List<long>();
         private readonly List<long> histMaxBid = new List<long>();
         private readonly List<long> histHVNTotal = new List<long>();
@@ -38,6 +42,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         private readonly HashSet<string> absorptionEmittedSignals = new HashSet<string>();
         private readonly Dictionary<int, int> orderLimitSignalsByBar = new Dictionary<int, int>();
         private readonly Dictionary<int, int> absorptionSignalsByBar = new Dictionary<int, int>();
+        private readonly Dictionary<int, int> divergenceSignalsByBar = new Dictionary<int, int>();
         #endregion
 
         #region OnStateChange
@@ -63,17 +68,27 @@ namespace NinjaTrader.NinjaScript.Indicators
                 AbsMultiplyVolume = 2.0;
                 AbsMinContracts = 150;
                 AbsMinSideShare = 0.25;
+
+                DivTimeFrameMinutes = 1;
+                DivLookbackBars = 15;
+                DivMinPriceMoveTicks = 12;
+                DivMinDeltaMove = 600;
             }
             else if (State == State.Configure)
             {
                 AddVolumetric(Instrument.FullName, BarsPeriodType.Minute, TimeFrameMinutes, VolumetricDeltaType.BidAsk, 1);
                 volBip = BarsArray.Length - 1;
+
+                AddVolumetric(Instrument.FullName, BarsPeriodType.Minute, DivTimeFrameMinutes, VolumetricDeltaType.BidAsk, 1);
+                divBip = BarsArray.Length - 1;
             }
             else if (State == State.DataLoaded)
             {
                 volBarsType = BarsArray[volBip].BarsType as VolumetricBarsType;
                 if (volBarsType != null)
                     volTickSize = BarsArray[volBip].Instrument.MasterInstrument.TickSize;
+
+                divVolBarsType = BarsArray[divBip].BarsType as VolumetricBarsType;
             }
             else if (State == State.Terminated)
             {
@@ -88,6 +103,12 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (BarsInProgress == volBip)
             {
                 ProcessVolumetricSeries();
+                return;
+            }
+
+            if (BarsInProgress == divBip)
+            {
+                ProcessDivergenceSeries();
                 return;
             }
 
@@ -415,7 +436,104 @@ namespace NinjaTrader.NinjaScript.Indicators
             absorptionEmittedSignals.Clear();
             orderLimitSignalsByBar.Clear();
             absorptionSignalsByBar.Clear();
+            divergenceSignalsByBar.Clear();
+            cumDeltaDiv.Clear();
             RemoveDrawObjects();
+        }
+        #endregion
+
+        #region Lógica de módulo Divergence
+        private void ProcessDivergenceSeries()
+        {
+            if (divVolBarsType == null)
+                return;
+
+            if (CurrentBars[divBip] < 0)
+                return;
+
+            if (ResetSession && BarsArray[divBip] != null && BarsArray[divBip].IsFirstBarOfSession && IsFirstTickOfBar)
+                ClearSessionState();
+
+            if (!IsFirstTickOfBar)
+                return;
+
+            int closedIndex = CurrentBars[divBip] - 1;
+            if (closedIndex < 0)
+                return;
+
+            double tickSize = BarsArray[divBip].Instrument.MasterInstrument.TickSize;
+            double low = Lows[divBip][1];
+            double high = Highs[divBip][1];
+
+            if (high < low)
+            {
+                double t = high;
+                high = low;
+                low = t;
+            }
+
+            int priceLevels = Math.Max(1, (int)Math.Round((high - low) / tickSize)) + 1;
+            long totalBid = 0;
+            long totalAsk = 0;
+
+            for (int level = 0; level < priceLevels; level++)
+            {
+                double price = Instrument.MasterInstrument.RoundToTickSize(low + level * tickSize);
+                totalBid += divVolBarsType.Volumes[closedIndex].GetBidVolumeForPrice(price);
+                totalAsk += divVolBarsType.Volumes[closedIndex].GetAskVolumeForPrice(price);
+            }
+
+            long deltaBar = totalAsk - totalBid;
+
+            double cumDeltaValue = deltaBar;
+            if (closedIndex > 0 && closedIndex - 1 < cumDeltaDiv.Count)
+                cumDeltaValue = cumDeltaDiv[closedIndex - 1] + deltaBar;
+
+            while (cumDeltaDiv.Count <= closedIndex)
+                cumDeltaDiv.Add(0);
+
+            cumDeltaDiv[closedIndex] = cumDeltaValue;
+
+            if (closedIndex + 1 < DivLookbackBars)
+                return;
+
+            int barsAgoCurrent = CurrentBars[divBip] - closedIndex;
+            int barsAgoPrev = barsAgoCurrent + DivLookbackBars - 1;
+
+            double priceNow = Closes[divBip][barsAgoCurrent];
+            double pricePrev = Closes[divBip][barsAgoPrev];
+
+            int prevIndex = closedIndex - (DivLookbackBars - 1);
+            if (prevIndex < 0 || prevIndex >= cumDeltaDiv.Count)
+                return;
+
+            double deltaNow = cumDeltaDiv[closedIndex];
+            double deltaPrev = cumDeltaDiv[prevIndex];
+
+            double priceChange = priceNow - pricePrev;
+            double deltaChange = deltaNow - deltaPrev;
+
+            if (Math.Abs(priceChange) < DivMinPriceMoveTicks * tickSize)
+                return;
+
+            if (Math.Abs(deltaChange) < DivMinDeltaMove)
+                return;
+
+            int side = 0;
+            if (priceChange < 0 && deltaChange > 0)
+                side = 1;
+            else if (priceChange > 0 && deltaChange < 0)
+                side = -1;
+
+            if (side == 0)
+                return;
+
+            DateTime barTime = Times[divBip][barsAgoCurrent];
+            int primaryBar = BarsArray[0].GetBar(barTime);
+            if (primaryBar < 0 || primaryBar > CurrentBars[0])
+                return;
+
+            divergenceSignalsByBar[primaryBar] = side;
         }
         #endregion
 
@@ -483,6 +601,15 @@ namespace NinjaTrader.NinjaScript.Indicators
                     rt.DrawTextLayout(new SharpDX.Vector2(textX, textY), layout, textBrush);
                 }
 
+                SharpDX.RectangleF divergenceRect = new SharpDX.RectangleF(panel.X, firstLineY + rowHeight * 3f, panel.W, rowHeight);
+                string divergenceLabel = "Divergence";
+                using (var layout = new TextLayout(Core.Globals.DirectWriteFactory, divergenceLabel, textFormat, divergenceRect.Width, rowHeight))
+                {
+                    float textX = panel.X + panel.W - layout.Metrics.Width - 6f;
+                    float textY = divergenceRect.Y + (rowHeight - layout.Metrics.Height) / 2f;
+                    rt.DrawTextLayout(new SharpDX.Vector2(textX, textY), layout, textBrush);
+                }
+
                 int startBar = Math.Max(ChartBars.FromIndex, 0);
                 int endBar = Math.Min(ChartBars.ToIndex, Bars.Count - 1);
 
@@ -490,6 +617,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 float row1Middle = firstLineY + rowHeight / 2f;
                 float row2Top = firstLineY + rowHeight * 1f;
                 float row2Middle = row2Top + rowHeight / 2f;
+                float row4Top = firstLineY + rowHeight * 3f;
+                float row4Middle = row4Top + rowHeight / 2f;
 
                 for (int barIndex = startBar; barIndex <= endBar; barIndex++)
                 {
@@ -514,6 +643,18 @@ namespace NinjaTrader.NinjaScript.Indicators
                     SharpDX.Color color = side > 0 ? new SharpDX.Color(255, 102, 0) : new SharpDX.Color(34, 139, 34);
 
                     DrawTriangle(rt, x, row2Middle, triangleSize, pointingUp, color);
+                }
+
+                for (int barIndex = startBar; barIndex <= endBar; barIndex++)
+                {
+                    if (!divergenceSignalsByBar.TryGetValue(barIndex, out int side))
+                        continue;
+
+                    float x = (float)chartControl.GetXByBarIndex(ChartBars, barIndex);
+                    bool pointingUp = side > 0;
+                    SharpDX.Color color = side > 0 ? new SharpDX.Color(34, 139, 34) : new SharpDX.Color(255, 102, 0);
+
+                    DrawTriangle(rt, x, row4Middle, triangleSize, pointingUp, color);
                 }
             }
         }
@@ -579,6 +720,97 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Range(0.0, 0.5)]
         [Display(Name = "Absorption - min % por lado", Description = "Mínimo porcentaje que debe tener cada lado (Bid/Ask) del total en el HVN", Order = 2, GroupName = "Absorption")]
         public double AbsMinSideShare { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "Div - TimeFrame (min)", Description = "Timeframe en minutos para la serie rápida de divergencia (por defecto 1)", Order = 0, GroupName = "Divergence")]
+        public int DivTimeFrameMinutes { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(3, 100)]
+        [Display(Name = "Div - Lookback barras", Description = "Número de barras rápidas usadas para medir la pendiente precio/delta", Order = 1, GroupName = "Divergence")]
+        public int DivLookbackBars { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "Div - min movimiento precio (ticks)", Description = "Mínimo movimiento absoluto de precio en la ventana para considerar divergencia", Order = 2, GroupName = "Divergence")]
+        public int DivMinPriceMoveTicks { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "Div - min movimiento cum delta", Description = "Mínimo movimiento absoluto de cumulative delta en la ventana para considerar divergencia", Order = 3, GroupName = "Divergence")]
+        public int DivMinDeltaMove { get; set; }
         #endregion
     }
 }
+
+#region NinjaScript generated code. Neither change nor remove.
+namespace NinjaTrader.NinjaScript.Indicators
+{
+    public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
+    {
+        private a2c[] cachea2c;
+
+        public a2c a2c(int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
+        {
+            return a2c(Input, timeFrameMinutes, resetSession, showHistory, multiplyVolume, minContracts, absMultiplyVolume, absMinContracts, absMinSideShare, divTimeFrameMinutes, divLookbackBars, divMinPriceMoveTicks, divMinDeltaMove);
+        }
+
+        public a2c a2c(ISeries<double> input, int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
+        {
+            if (cachea2c != null)
+                for (int idx = 0; idx < cachea2c.Length; idx++)
+                    if (cachea2c[idx] != null && cachea2c[idx].TimeFrameMinutes == timeFrameMinutes && cachea2c[idx].ResetSession == resetSession && cachea2c[idx].ShowHistory == showHistory && cachea2c[idx].MultiplyVolume == multiplyVolume && cachea2c[idx].MinContracts == minContracts && cachea2c[idx].AbsMultiplyVolume == absMultiplyVolume && cachea2c[idx].AbsMinContracts == absMinContracts && cachea2c[idx].AbsMinSideShare == absMinSideShare && cachea2c[idx].DivTimeFrameMinutes == divTimeFrameMinutes && cachea2c[idx].DivLookbackBars == divLookbackBars && cachea2c[idx].DivMinPriceMoveTicks == divMinPriceMoveTicks && cachea2c[idx].DivMinDeltaMove == divMinDeltaMove && cachea2c[idx].EqualsInput(input))
+                        return cachea2c[idx];
+
+            return CacheIndicator<a2c>(new a2c()
+            {
+                TimeFrameMinutes = timeFrameMinutes,
+                ResetSession = resetSession,
+                ShowHistory = showHistory,
+                MultiplyVolume = multiplyVolume,
+                MinContracts = minContracts,
+                AbsMultiplyVolume = absMultiplyVolume,
+                AbsMinContracts = absMinContracts,
+                AbsMinSideShare = absMinSideShare,
+                DivTimeFrameMinutes = divTimeFrameMinutes,
+                DivLookbackBars = divLookbackBars,
+                DivMinPriceMoveTicks = divMinPriceMoveTicks,
+                DivMinDeltaMove = divMinDeltaMove
+            }, input, ref cachea2c);
+        }
+    }
+}
+
+namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
+{
+    public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
+    {
+        public Indicators.a2c a2c(int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
+        {
+            return indicator.a2c(Input, timeFrameMinutes, resetSession, showHistory, multiplyVolume, minContracts, absMultiplyVolume, absMinContracts, absMinSideShare, divTimeFrameMinutes, divLookbackBars, divMinPriceMoveTicks, divMinDeltaMove);
+        }
+
+        public Indicators.a2c a2c(ISeries<double> input, int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
+        {
+            return indicator.a2c(input, timeFrameMinutes, resetSession, showHistory, multiplyVolume, minContracts, absMultiplyVolume, absMinContracts, absMinSideShare, divTimeFrameMinutes, divLookbackBars, divMinPriceMoveTicks, divMinDeltaMove);
+        }
+    }
+}
+
+namespace NinjaTrader.NinjaScript.Strategies
+{
+    public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
+    {
+        public Indicators.a2c a2c(int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
+        {
+            return indicator.a2c(Input, timeFrameMinutes, resetSession, showHistory, multiplyVolume, minContracts, absMultiplyVolume, absMinContracts, absMinSideShare, divTimeFrameMinutes, divLookbackBars, divMinPriceMoveTicks, divMinDeltaMove);
+        }
+
+        public Indicators.a2c a2c(ISeries<double> input, int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
+        {
+            return indicator.a2c(input, timeFrameMinutes, resetSession, showHistory, multiplyVolume, minContracts, absMultiplyVolume, absMinContracts, absMinSideShare, divTimeFrameMinutes, divLookbackBars, divMinPriceMoveTicks, divMinDeltaMove);
+        }
+    }
+}
+#endregion
