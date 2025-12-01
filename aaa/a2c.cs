@@ -5,9 +5,13 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Windows.Media;
+using SharpDX;
+using SharpDX.Direct2D1;
+using SharpDX.DirectWrite;
 using NinjaTrader.Cbi;
 using NinjaTrader.Core.FloatingPoint;
 using NinjaTrader.Data;
+using NinjaTrader.Gui.Chart;
 using NinjaTrader.Gui.Tools;
 using NinjaTrader.NinjaScript;
 using NinjaTrader.NinjaScript.BarsTypes;
@@ -29,6 +33,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         private readonly List<long> histMaxBid = new List<long>();
 
         private readonly HashSet<string> emittedSignals = new HashSet<string>();
+        private readonly Dictionary<int, int> orderLimitSignalsByBar = new Dictionary<int, int>();
         #endregion
 
         #region OnStateChange
@@ -239,6 +244,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 Draw.TriangleDown(this, tag, false, barsAgo, price, brush);
 
             emittedSignals.Add(key);
+            orderLimitSignalsByBar[primaryBar] = isBidSide ? 1 : -1;
         }
 
         private void UpdateBaseline(long maxBid, long maxAsk)
@@ -278,7 +284,106 @@ namespace NinjaTrader.NinjaScript.Indicators
             histMaxAsk.Clear();
             histMaxBid.Clear();
             emittedSignals.Clear();
+            orderLimitSignalsByBar.Clear();
             RemoveDrawObjects();
+        }
+        #endregion
+
+        #region Render
+        public override void OnRender(ChartControl chartControl, ChartScale chartScale)
+        {
+            base.OnRender(chartControl, chartScale);
+
+            if (chartControl == null || chartScale == null || ChartBars == null || Bars == null)
+                return;
+
+            ChartPanel panel = ChartPanel;
+            if (panel == null)
+                return;
+
+            float rowHeight = 18f;
+            float topMargin = 4f;
+            float bottomMargin = 2f;
+            float totalHeight = rowHeight * 4f + topMargin + bottomMargin;
+
+            float bottom = panel.Y + panel.H;
+            float top = bottom - totalHeight;
+
+            SharpDX.RectangleF backgroundRect = new SharpDX.RectangleF(panel.X, top, panel.W, totalHeight);
+
+            RenderTarget rt = chartControl.DxRenderTarget;
+            if (rt == null)
+                return;
+
+            using (var bgBrush = new SolidColorBrush(rt, new SharpDX.Color(10, 10, 10, 200)))
+            using (var gridBrush = new SolidColorBrush(rt, new SharpDX.Color(200, 200, 200, 120)))
+            using (var textBrush = new SolidColorBrush(rt, new SharpDX.Color(200, 200, 200, 180)))
+            using (var textFormat = new TextFormat(Core.Globals.DirectWriteFactory, chartControl.Properties.ChartFont.FamilyName, chartControl.Properties.ChartFont.Size - 1))
+            {
+                rt.FillRectangle(backgroundRect, bgBrush);
+
+                float firstLineY = top + topMargin;
+                float lastLineY = bottom - bottomMargin;
+
+                rt.DrawLine(new SharpDX.Vector2(panel.X, firstLineY), new SharpDX.Vector2(panel.X + panel.W, firstLineY), gridBrush, 1f);
+
+                for (int i = 1; i < 4; i++)
+                {
+                    float y = firstLineY + rowHeight * i;
+                    rt.DrawLine(new SharpDX.Vector2(panel.X, y), new SharpDX.Vector2(panel.X + panel.W, y), gridBrush, 1f);
+                }
+
+                rt.DrawLine(new SharpDX.Vector2(panel.X, lastLineY), new SharpDX.Vector2(panel.X + panel.W, lastLineY), gridBrush, 1f);
+
+                SharpDX.RectangleF orderLimitRect = new SharpDX.RectangleF(panel.X, firstLineY, panel.W, rowHeight);
+                string orderLimitLabel = "Order Limit";
+                using (var layout = new TextLayout(Core.Globals.DirectWriteFactory, orderLimitLabel, textFormat, orderLimitRect.Width, rowHeight))
+                {
+                    float textX = panel.X + panel.W - layout.Metrics.Width - 6f;
+                    float textY = firstLineY + (rowHeight - layout.Metrics.Height) / 2f;
+                    rt.DrawTextLayout(new SharpDX.Vector2(textX, textY), layout, textBrush);
+                }
+
+                int startBar = Math.Max(ChartBars.FromIndex, 0);
+                int endBar = Math.Min(ChartBars.ToIndex, Bars.Count - 1);
+
+                float triangleSize = 5f;
+                float rowMiddle = firstLineY + rowHeight / 2f;
+
+                for (int barIndex = startBar; barIndex <= endBar; barIndex++)
+                {
+                    if (!orderLimitSignalsByBar.TryGetValue(barIndex, out int side))
+                        continue;
+
+                    float x = (float)chartControl.GetXByBarIndex(ChartBars, barIndex);
+                    bool isBidSide = side > 0;
+                    SharpDX.Color color = isBidSide ? new SharpDX.Color(34, 139, 34) : new SharpDX.Color(255, 102, 0);
+
+                    DrawTriangle(rt, x, rowMiddle, triangleSize, isBidSide, color);
+                }
+            }
+        }
+
+        private void DrawTriangle(RenderTarget rt, float centerX, float centerY, float size, bool pointingUp, SharpDX.Color color)
+        {
+            using (var brush = new SolidColorBrush(rt, color))
+            using (var geometry = new PathGeometry(rt.Factory))
+            {
+                using (GeometrySink sink = geometry.Open())
+                {
+                    Vector2 p1 = new Vector2(centerX, pointingUp ? centerY - size : centerY + size);
+                    Vector2 p2 = new Vector2(centerX - size, pointingUp ? centerY + size : centerY - size);
+                    Vector2 p3 = new Vector2(centerX + size, pointingUp ? centerY + size : centerY - size);
+
+                    sink.BeginFigure(p1, FigureBegin.Filled);
+                    sink.AddLine(p2);
+                    sink.AddLine(p3);
+                    sink.EndFigure(FigureEnd.Closed);
+                    sink.Close();
+                }
+
+                rt.FillGeometry(geometry, brush);
+            }
         }
         #endregion
 
