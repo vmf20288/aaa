@@ -146,7 +146,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 MinVelasConfirmacion     = 0;   // activación inmediata
                 MargenTicksBorre         = 6;   // v4: margen por defecto
                 ResetSession             = true;
-                ShowHistory              = false;
+                ShowHistory              = true;
             }
             else if (State == State.Configure)
             {
