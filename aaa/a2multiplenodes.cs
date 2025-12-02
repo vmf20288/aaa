@@ -160,7 +160,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 // Visible
                 ToleranciaTicks   = 6;
-                ShowHistory       = false;
+                ShowHistory       = true;
                 RestartSession    = true;
             }
             else if (State == State.Configure)
