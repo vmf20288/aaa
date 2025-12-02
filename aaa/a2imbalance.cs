@@ -59,7 +59,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 ToleranciaBorrarTicks = 6; // ticks
                 FiltroSupervivencia = true;
                 SessionReset = true;
-                ShowHistory = false;
+                ShowHistory = true;
             }
             else if (State == State.Configure)
             {
