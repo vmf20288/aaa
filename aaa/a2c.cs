@@ -55,7 +55,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 TimeFrameMinutes = 5;
                 ResetSession = true;
-                ShowHistory = false;
+                ShowHistory = true;
 
                 MultiplyVolume = 2.5;
                 MinContracts = 100;
