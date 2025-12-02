@@ -244,7 +244,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 UseMinPrint      = true;
                 MinPrintVol      = 5;
                 ResetSession     = true;
-                ShowHistory      = false;
+                ShowHistory      = true;
 
                 AddPlot(Brushes.Transparent, "LastMinTradeVolume");
                 AddPlot(Brushes.Transparent, "LastMinTradePrice");
