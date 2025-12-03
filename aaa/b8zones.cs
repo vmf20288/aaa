@@ -95,7 +95,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private DWrite.Factory  dwFactory;
         private DWrite.TextFormat textFormat;
-        private Dictionary<int, DWrite.TextLayout> tfLayouts;
+        private Dictionary<string, DWrite.TextLayout> tfLayouts;
 
         // ───────────────  LIFECYCLE  ───────────────
         protected override void OnStateChange()
@@ -139,7 +139,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 dwFactory  = new DWrite.Factory();
                 textFormat = new DWrite.TextFormat(dwFactory, "Arial", 12f);
-                tfLayouts  = new Dictionary<int, DWrite.TextLayout>();
+                tfLayouts  = new Dictionary<string, DWrite.TextLayout>();
             }
             else if (State == State.Terminated)
             {
@@ -497,7 +497,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 dwFactory  = new DWrite.Factory();
                 textFormat = new DWrite.TextFormat(dwFactory, "Arial", 12f);
-                tfLayouts  = new Dictionary<int, DWrite.TextLayout>();
+                tfLayouts  = new Dictionary<string, DWrite.TextLayout>();
             }
         }
 
@@ -520,9 +520,9 @@ namespace NinjaTrader.NinjaScript.Indicators
         private DWrite.TextLayout GetOrCreateLayout(int bip, string prefix = "")
         {
             if (tfLayouts == null)
-                tfLayouts = new Dictionary<int, DWrite.TextLayout>();
+                tfLayouts = new Dictionary<string, DWrite.TextLayout>();
 
-            int key = (prefix + bip).GetHashCode();
+            string key = prefix + bip;
 
             if (!tfLayouts.TryGetValue(key, out var tl))
             {
@@ -536,14 +536,12 @@ namespace NinjaTrader.NinjaScript.Indicators
         private DWrite.TextLayout GetOrCreateLayout(string text)
         {
             if (tfLayouts == null)
-                tfLayouts = new Dictionary<int, DWrite.TextLayout>();
+                tfLayouts = new Dictionary<string, DWrite.TextLayout>();
 
-            int key = text.GetHashCode();
-
-            if (!tfLayouts.TryGetValue(key, out var tl))
+            if (!tfLayouts.TryGetValue(text, out var tl))
             {
                 tl = new DWrite.TextLayout(dwFactory, text, textFormat, 100, textFormat.FontSize);
-                tfLayouts[key] = tl;
+                tfLayouts[text] = tl;
             }
             return tl;
         }
