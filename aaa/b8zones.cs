@@ -278,7 +278,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (aoiCand != null)
             {
                 llLines.Add(new LLLineInfo(aoiCand.Time, aoiCand.IsSupply, aoiCand.AOI,
-                                           aoiCand.DataSeries, true));
+                                           aoiCand.DataSeries, true, winner.Time));
                 losing.Add(aoiCand.DataSeries);
             }
 
@@ -393,10 +393,20 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (!removeLine) return;
 
             for (int j = llLines.Count - 1; j >= 0; j--)
-                if (llLines[j].Time == z.Time &&
-                    llLines[j].IsSupply == z.IsSupply &&
-                    llLines[j].DataSeries == z.DataSeries)
+            {
+                LLLineInfo line = llLines[j];
+
+                bool isOriginal = line.Time == z.Time &&
+                                  line.IsSupply == z.IsSupply &&
+                                  line.DataSeries == z.DataSeries;
+
+                bool isInheritedFromZone = line.Inherited &&
+                                           line.ParentZoneTime.HasValue &&
+                                           line.ParentZoneTime.Value == z.Time;
+
+                if (isOriginal || isInheritedFromZone)
                     llLines.RemoveAt(j);
+            }
         }
 
         // ───────────────  RENDER  ───────────────
@@ -634,20 +644,22 @@ namespace NinjaTrader.NinjaScript.Indicators
         private class LLLineInfo
         {
             public LLLineInfo(DateTime time, bool isSupply, double price, int dataSeries,
-                             bool inherited = false)
+                             bool inherited = false, DateTime? parentZoneTime = null)
             {
-                Time       = time;
-                IsSupply   = isSupply;
-                Price      = price;
-                DataSeries = dataSeries;
-                Inherited  = inherited;
+                Time           = time;
+                IsSupply       = isSupply;
+                Price          = price;
+                DataSeries     = dataSeries;
+                Inherited      = inherited;
+                ParentZoneTime = parentZoneTime;
             }
 
-            public DateTime Time { get; }
-            public bool     IsSupply { get; }
-            public double   Price { get; }
-            public int      DataSeries { get; }
-            public bool     Inherited { get; set; }
+            public DateTime  Time { get; }
+            public bool      IsSupply { get; }
+            public double    Price { get; }
+            public int       DataSeries { get; }
+            public bool      Inherited { get; set; }
+            public DateTime? ParentZoneTime { get; }
         }
     }
 
