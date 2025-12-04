@@ -91,11 +91,17 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private SolidColorBrush brushFill;
         private SolidColorBrush brushOutline;
+        private SolidColorBrush brushAoiLl;
         private StrokeStyle     strokeStyleDotted;
 
         private DWrite.Factory  dwFactory;
         private DWrite.TextFormat textFormat;
         private Dictionary<string, DWrite.TextLayout> tfLayouts;
+
+        private SessionIterator sessionIterator;
+        private DateTime        cutoffIntraday = DateTime.MinValue;
+        private DateTime        lastSessionBegin = DateTime.MinValue;
+        private DateTime        previousSessionBegin = DateTime.MinValue;
 
         // ───────────────  LIFECYCLE  ───────────────
         protected override void OnStateChange()
@@ -140,6 +146,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 dwFactory  = new DWrite.Factory();
                 textFormat = new DWrite.TextFormat(dwFactory, "Arial", 12f);
                 tfLayouts  = new Dictionary<string, DWrite.TextLayout>();
+                sessionIterator = new SessionIterator(BarsArray[0]);
             }
             else if (State == State.Terminated)
             {
@@ -164,6 +171,9 @@ namespace NinjaTrader.NinjaScript.Indicators
         private void CheckCreateZone()
         {
             int bip = BarsInProgress;
+
+            if (bip >= 1 && bip <= 3 && ShouldSkipIntraday(bip))
+                return;
 
             // Vela base (índice 1) y agresiva (índice 0)
             double baseOpen   = Opens[bip][1];
@@ -353,39 +363,138 @@ namespace NinjaTrader.NinjaScript.Indicators
         private void CheckBreakZones()
         {
             int bip = BarsInProgress;
-            double closeCurrent = Closes[bip][0];
+            if (bip != 1) return;
+
+            if (ShouldSkipIntraday(bip))
+                return;
+
+            double closeCurrent = Closes[1][0];
 
             for (int i = zones.Count - 1; i >= 0; i--)
             {
                 ZoneInfo z = zones[i];
-                if (z.DataSeries != bip) continue;
 
-                bool isOutside = z.IsSupply
-                                 ? closeCurrent > z.TopPrice
-                                 : closeCurrent < z.BottomPrice;
+                ZonePosition pos = GetZonePosition(z, closeCurrent);
+                ZonePosition breakSide    = z.IsSupply ? ZonePosition.AboveZone : ZonePosition.BelowZone;
+                ZonePosition oppositeSide = z.IsSupply ? ZonePosition.BelowZone : ZonePosition.AboveZone;
 
                 if (RotaOption == BreakMode.Reentry)
                 {
-                    bool isTransition = !z.WasOutside && isOutside;
-                    if (isTransition)
-                    {
-                        z.BreakEpisodes++;
-                        if (z.BreakEpisodes >= BreakCandlesNeeded)
-                        {
-                            RemoveZone(i);
-                            continue;
-                        }
-                    }
-
-                    z.WasOutside = isOutside;
+                    if (HandleReentryBreak(z, pos, breakSide, oppositeSide, i))
+                        continue;
                 }
                 else // Immediate
                 {
+                    bool isOutside = pos == breakSide;
                     z.ConsecutiveBreaks = isOutside ? z.ConsecutiveBreaks + 1 : 0;
+                    if (isOutside)
+                        z.HasBrokenOnce = true;
                     if (z.ConsecutiveBreaks >= BreakCandlesNeeded)
+                    {
                         RemoveZone(i);
+                        continue;
+                    }
+                }
+
+                if (z.HasBrokenOnce && IsInsideNextZone(z, closeCurrent, i))
+                {
+                    RemoveZone(i);
+                    continue;
+                }
+
+                z.LastPosition = pos;
+            }
+        }
+
+        private bool HandleReentryBreak(ZoneInfo z, ZonePosition pos, ZonePosition breakSide,
+                                        ZonePosition oppositeSide, int idx)
+        {
+            if (pos == breakSide && z.ReadyForNextEpisode && z.LastPosition != breakSide)
+            {
+                z.BreakEpisodes++;
+                z.HasBrokenOnce = true;
+                z.ReadyForNextEpisode = false;
+                z.ReturnedInsideAfterBreak = false;
+
+                if (z.BreakEpisodes >= BreakCandlesNeeded)
+                {
+                    RemoveZone(idx);
+                    return true;
                 }
             }
+            else
+            {
+                if (!z.ReadyForNextEpisode && z.BreakEpisodes > 0)
+                {
+                    if (pos == ZonePosition.InsideZone)
+                        z.ReturnedInsideAfterBreak = true;
+                    else if (pos == oppositeSide && z.ReturnedInsideAfterBreak)
+                    {
+                        z.ReadyForNextEpisode = true;
+                        z.ReturnedInsideAfterBreak = false;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsInsideNextZone(ZoneInfo current, double closeCurrent, int currentIndex)
+        {
+            for (int j = 0; j < zones.Count; j++)
+            {
+                if (j == currentIndex) continue;
+
+                ZoneInfo other = zones[j];
+                if (other.IsSupply != current.IsSupply) continue;
+
+                bool isNextInDirection = current.IsSupply
+                    ? other.TopPrice > current.TopPrice
+                    : other.BottomPrice < current.BottomPrice;
+
+                if (!isNextInDirection) continue;
+
+                if (closeCurrent >= Math.Min(other.BottomPrice, other.TopPrice) &&
+                    closeCurrent <= Math.Max(other.BottomPrice, other.TopPrice))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private ZonePosition GetZonePosition(ZoneInfo z, double closeCurrent)
+        {
+            if (closeCurrent < z.BottomPrice)
+                return ZonePosition.BelowZone;
+            if (closeCurrent > z.TopPrice)
+                return ZonePosition.AboveZone;
+            return ZonePosition.InsideZone;
+        }
+
+        private bool ShouldSkipIntraday(int bip)
+        {
+            if (bip < 1 || bip > 3)
+                return false;
+
+            UpdateSessionCutoff(Times[bip][0]);
+            return cutoffIntraday != DateTime.MinValue && Times[bip][0] < cutoffIntraday;
+        }
+
+        private void UpdateSessionCutoff(DateTime time)
+        {
+            if (sessionIterator == null)
+                return;
+
+            if (sessionIterator.GetNextSession(time, true))
+            {
+                if (lastSessionBegin != DateTime.MinValue)
+                    previousSessionBegin = lastSessionBegin;
+
+                lastSessionBegin = sessionIterator.ActualSessionBegin;
+            }
+
+            if (previousSessionBegin != DateTime.MinValue)
+                cutoffIntraday = previousSessionBegin;
         }
 
         private void RemoveZone(int idx, bool removeLine = true)
@@ -410,6 +519,14 @@ namespace NinjaTrader.NinjaScript.Indicators
                 if (isOriginal || isInheritedFromZone)
                     llLines.RemoveAt(j);
             }
+        }
+
+        private enum ZonePosition
+        {
+            Unknown,
+            BelowZone,
+            InsideZone,
+            AboveZone
         }
 
         // ───────────────  RENDER  ───────────────
@@ -459,7 +576,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 var tl = GetOrCreateLayout(z.TfLabel);
                 float tx = xRight - tl.Metrics.Width - 5;
                 float ty = z.IsSupply ? (yBase + 5) : (yBase - tl.Metrics.Height - 5);
-                RenderTarget.DrawTextLayout(new Vector2(tx, ty), tl, brushOutline);
+                RenderTarget.DrawTextLayout(new Vector2(tx, ty), tl, brushAoiLl);
             }
 
             // AOI
@@ -470,14 +587,14 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 RenderTarget.DrawLine(new Vector2(xBase, y),
                                       new Vector2(xRight, y),
-                                      brushOutline, 2f);
+                                      brushAoiLl, 2f);
 
                 var tl = l.Inherited
                     ? GetOrCreateLayout("/" + bipToTf(l.DataSeries))
                     : GetOrCreateLayout("AOI " + bipToTf(l.DataSeries));
                 float tx = xRight - tl.Metrics.Width - 5;
                 float ty = l.IsSupply ? (y + 5) : (y - tl.Metrics.Height - 5);
-                RenderTarget.DrawTextLayout(new Vector2(tx, ty), tl, brushOutline);
+                RenderTarget.DrawTextLayout(new Vector2(tx, ty), tl, brushAoiLl);
             }
         }
 
@@ -498,6 +615,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             // Pinceles y línea discontinua
             brushFill    ??= new SolidColorBrush(RenderTarget, new Color(0.8f, 0.8f, 0.8f, 0.4f));
             brushOutline ??= new SolidColorBrush(RenderTarget, new Color(0f, 0f, 0f, 1f));
+            brushAoiLl   ??= new SolidColorBrush(RenderTarget, new Color(0.7f, 0.7f, 0.7f, 1f));
 
             if (strokeStyleDotted == null)
             {
@@ -518,6 +636,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             brushFill?.Dispose();        brushFill = null;
             brushOutline?.Dispose();     brushOutline = null;
+            brushAoiLl?.Dispose();       brushAoiLl = null;
             strokeStyleDotted?.Dispose(); strokeStyleDotted = null;
 
             if (tfLayouts != null)
@@ -644,6 +763,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             public bool HasBrokenOnce     { get; set; }
             public bool WasOutside        { get; set; }
             public int  BreakEpisodes     { get; set; }
+            public ZonePosition LastPosition { get; set; } = ZonePosition.Unknown;
+            public bool ReadyForNextEpisode { get; set; } = true;
+            public bool ReturnedInsideAfterBreak { get; set; }
         }
 
         private class LLLineInfo
