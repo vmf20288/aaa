@@ -366,15 +366,18 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 if (RotaOption == BreakMode.Reentry)
                 {
-                    if (isOutside)
+                    bool isTransition = !z.WasOutside && isOutside;
+                    if (isTransition)
                     {
-                        if (!z.HasBrokenOnce)
-                            z.HasBrokenOnce = true;
-                        else
+                        z.BreakEpisodes++;
+                        if (z.BreakEpisodes >= BreakCandlesNeeded)
+                        {
                             RemoveZone(i);
+                            continue;
+                        }
                     }
-                    else
-                        z.HasBrokenOnce = false;
+
+                    z.WasOutside = isOutside;
                 }
                 else // Immediate
                 {
@@ -639,6 +642,8 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             public int  ConsecutiveBreaks { get; set; }
             public bool HasBrokenOnce     { get; set; }
+            public bool WasOutside        { get; set; }
+            public int  BreakEpisodes     { get; set; }
         }
 
         private class LLLineInfo
