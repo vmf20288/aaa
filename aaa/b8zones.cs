@@ -89,6 +89,10 @@ namespace NinjaTrader.NinjaScript.Indicators
         private List<ZoneInfo> zones;
         private List<LLLineInfo> llLines;
 
+        private DateTime currentSessionDate5m;
+        private DateTime previousSessionDate5m;
+        private bool     sessionDatesInitialized;
+
         private SolidColorBrush brushFill;
         private SolidColorBrush brushOutline;
         private SolidColorBrush brushAoi;
@@ -152,13 +156,32 @@ namespace NinjaTrader.NinjaScript.Indicators
         protected override void OnBarUpdate()
         {
             if (BarsInProgress == 0) return;
+            if (BarsInProgress == 1)
+                UpdateSessionDates();
             if (CurrentBars[BarsInProgress] < 2) return;
+
+            if (BarsInProgress <= 3)
+            {
+                DateTime sessionDate = Times[BarsInProgress][0].Date;
+                if (sessionDatesInitialized && sessionDate < previousSessionDate5m)
+                    return;
+            }
 
             lock (_sync)
             {
                 CheckCreateZone();
                 CheckBreakZones();
             }
+        }
+
+        private void UpdateSessionDates()
+        {
+            if (!BarsArray[1].IsFirstBarOfSession)
+                return;
+
+            previousSessionDate5m = currentSessionDate5m;
+            currentSessionDate5m  = Times[1][0].Date;
+            sessionDatesInitialized = currentSessionDate5m != default(DateTime);
         }
 
         // ───────────────  CREAR ZONA  ───────────────
