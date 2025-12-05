@@ -52,7 +52,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         [Range(1, int.MaxValue)]
         [Display(Name = "# velas rompe", Order = 4, GroupName = "Parameters",
-            Description = "Velas consecutivas cerrando fuera que eliminan la zona.")]
+            Description = "Immediate: velas consecutivas cerrando fuera que eliminan la zona. Reentry: episodios de rotura completa (precio cruza toda la zona de un lado al otro).")]
         [NinjaScriptProperty]
         public int BreakCandlesNeeded { get; set; }
 
@@ -304,10 +304,6 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private int CompareZones(ZoneInfo a, ZoneInfo b)
         {
-            bool aNever = !a.HasBrokenOnce && a.ConsecutiveBreaks == 0;
-            bool bNever = !b.HasBrokenOnce && b.ConsecutiveBreaks == 0;
-            if (aNever != bNever) return aNever ? 1 : -1;
-
             if (a.AggressiveTicks != b.AggressiveTicks)
                 return a.AggressiveTicks > b.AggressiveTicks ? 1 : -1;
 
@@ -705,8 +701,6 @@ namespace NinjaTrader.NinjaScript.Indicators
             public string    TfLabel { get; set; }
 
             public int  ConsecutiveBreaks { get; set; }
-            public bool HasBrokenOnce     { get; set; }
-            public bool WasOutside        { get; set; }
             public int  BreakEpisodes     { get; set; }
             public int  LastSideOutside   { get; set; }
         }
