@@ -91,6 +91,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private SolidColorBrush brushFill;
         private SolidColorBrush brushOutline;
+        private SolidColorBrush brushAoi;
         private StrokeStyle     strokeStyleDotted;
 
         private DWrite.Factory  dwFactory;
@@ -352,22 +353,31 @@ namespace NinjaTrader.NinjaScript.Indicators
         // ───────────────  ROMPER ZONAS  ───────────────
         private void CheckBreakZones()
         {
-            int bip = BarsInProgress;
-            double closeCurrent = Closes[bip][0];
+            if (BarsInProgress != 1)
+                return;
+
+            double close5m = Closes[1][0];
 
             for (int i = zones.Count - 1; i >= 0; i--)
             {
                 ZoneInfo z = zones[i];
-                if (z.DataSeries != bip) continue;
 
-                bool isOutside = z.IsSupply
-                                 ? closeCurrent > z.TopPrice
-                                 : closeCurrent < z.BottomPrice;
+                bool isAbove = close5m > z.TopPrice;
+                bool isBelow = close5m < z.BottomPrice;
 
                 if (RotaOption == BreakMode.Reentry)
                 {
-                    bool isTransition = !z.WasOutside && isOutside;
-                    if (isTransition)
+                    if (z.LastSideOutside == 0)
+                    {
+                        if (isAbove) z.LastSideOutside = 1;
+                        else if (isBelow) z.LastSideOutside = -1;
+                    }
+
+                    bool isEpisode = z.IsSupply
+                                     ? (z.LastSideOutside == -1 && isAbove)
+                                     : (z.LastSideOutside == 1 && isBelow);
+
+                    if (isEpisode)
                     {
                         z.BreakEpisodes++;
                         if (z.BreakEpisodes >= BreakCandlesNeeded)
@@ -377,14 +387,65 @@ namespace NinjaTrader.NinjaScript.Indicators
                         }
                     }
 
-                    z.WasOutside = isOutside;
+                    if (isAbove)
+                        z.LastSideOutside = 1;
+                    else if (isBelow)
+                        z.LastSideOutside = -1;
                 }
                 else // Immediate
                 {
+                    bool isOutside = z.IsSupply ? isAbove : isBelow;
                     z.ConsecutiveBreaks = isOutside ? z.ConsecutiveBreaks + 1 : 0;
                     if (z.ConsecutiveBreaks >= BreakCandlesNeeded)
                         RemoveZone(i);
                 }
+            }
+
+            if (RotaOption != BreakMode.Reentry)
+                return;
+
+            for (int i = zones.Count - 1; i >= 0; i--)
+            {
+                ZoneInfo z = zones[i];
+                if (z.BreakEpisodes < 1 || z.BreakEpisodes >= BreakCandlesNeeded)
+                    continue;
+
+                ZoneInfo? zNext = null;
+                foreach (ZoneInfo other in zones)
+                {
+                    if (ReferenceEquals(z, other)) continue;
+                    if (other.IsSupply != z.IsSupply) continue;
+
+                    bool isCandidate = z.IsSupply
+                        ? other.BottomPrice > z.TopPrice
+                        : other.TopPrice < z.BottomPrice;
+
+                    if (!isCandidate) continue;
+
+                    if (zNext == null)
+                    {
+                        zNext = other;
+                        continue;
+                    }
+
+                    if (z.IsSupply)
+                    {
+                        if (other.BottomPrice < zNext.BottomPrice)
+                            zNext = other;
+                    }
+                    else
+                    {
+                        if (other.TopPrice > zNext.TopPrice)
+                            zNext = other;
+                    }
+                }
+
+                if (zNext == null)
+                    continue;
+
+                bool closeInsideNext = close5m >= zNext.BottomPrice && close5m <= zNext.TopPrice;
+                if (closeInsideNext)
+                    RemoveZone(i);
             }
         }
 
@@ -470,14 +531,14 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 RenderTarget.DrawLine(new Vector2(xBase, y),
                                       new Vector2(xRight, y),
-                                      brushOutline, 2f);
+                                      brushAoi, 2f);
 
                 var tl = l.Inherited
                     ? GetOrCreateLayout("/" + bipToTf(l.DataSeries))
                     : GetOrCreateLayout("AOI " + bipToTf(l.DataSeries));
                 float tx = xRight - tl.Metrics.Width - 5;
                 float ty = l.IsSupply ? (y + 5) : (y - tl.Metrics.Height - 5);
-                RenderTarget.DrawTextLayout(new Vector2(tx, ty), tl, brushOutline);
+                RenderTarget.DrawTextLayout(new Vector2(tx, ty), tl, brushAoi);
             }
         }
 
@@ -498,6 +559,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             // Pinceles y línea discontinua
             brushFill    ??= new SolidColorBrush(RenderTarget, new Color(0.8f, 0.8f, 0.8f, 0.4f));
             brushOutline ??= new SolidColorBrush(RenderTarget, new Color(0f, 0f, 0f, 1f));
+            brushAoi     ??= new SolidColorBrush(RenderTarget, new Color(0.7f, 0.7f, 0.7f, 1f));
 
             if (strokeStyleDotted == null)
             {
@@ -518,6 +580,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             brushFill?.Dispose();        brushFill = null;
             brushOutline?.Dispose();     brushOutline = null;
+            brushAoi?.Dispose();         brushAoi = null;
             strokeStyleDotted?.Dispose(); strokeStyleDotted = null;
 
             if (tfLayouts != null)
@@ -624,6 +687,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 Area3       = isSupply ? BottomPrice : TopPrice;
                 Area2       = (Area1 + Area3) / 2.0;
                 LosingTFs   = new List<int>();
+                LastSideOutside = 0;
             }
 
             public DateTime Time { get; }
@@ -644,6 +708,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             public bool HasBrokenOnce     { get; set; }
             public bool WasOutside        { get; set; }
             public int  BreakEpisodes     { get; set; }
+            public int  LastSideOutside   { get; set; }
         }
 
         private class LLLineInfo
