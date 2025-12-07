@@ -10,7 +10,6 @@ using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Windows.Media;
 using System.Xml.Serialization;
-using NinjaTrader.Gui.Serialization;
 using NinjaTrader.Data;
 using NinjaTrader.Gui.NinjaScript;
 using NinjaTrader.Gui.Tools;
@@ -378,6 +377,28 @@ namespace NinjaTrader.NinjaScript.Indicators
             Plots[7].Brush = Anchor2Band1Brush;
             Plots[8].Brush = Anchor2Band2Brush;
             Plots[9].Brush = Anchor2Band2Brush;
+        }
+
+        private static class Serialize
+        {
+            private static readonly BrushConverter BrushConverter = new BrushConverter();
+
+            public static string BrushToString(Brush brush)
+            {
+                return BrushConverter.ConvertToString(brush);
+            }
+
+            public static Brush StringToBrush(string value)
+            {
+                try
+                {
+                    return (Brush)BrushConverter.ConvertFromString(value);
+                }
+                catch
+                {
+                    return null;
+                }
+            }
         }
 
         #region Propiedades
