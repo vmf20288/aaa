@@ -10,6 +10,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Windows.Media;
 using System.Xml.Serialization;
+using NinjaTrader.Gui.Serialization;
 using NinjaTrader.Data;
 using NinjaTrader.Gui.NinjaScript;
 using NinjaTrader.Gui.Tools;
@@ -361,7 +362,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private void UpdatePlotBrushes()
         {
-            if (Plots == null || Plots.Count < 10)
+            if (Plots == null || Plots.Length < 10)
                 return;
 
             // Módulo 1
