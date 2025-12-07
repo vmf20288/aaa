@@ -93,8 +93,14 @@ namespace NinjaTrader.NinjaScript.Indicators
             else if (State == State.DataLoaded)
             {
                 // Construir DateTime inicial desde propiedades
-                anchor1DateTime = BuildAnchorDateTime(Anchor1Date, Anchor1Time);
-                anchor2DateTime = BuildAnchorDateTime(Anchor2Date, Anchor2Time);
+                DateTime initialAnchor;
+                if (!TryBuildAnchorDateTime(Anchor1Date, Anchor1Time, out initialAnchor))
+                    initialAnchor = Anchor1Date.Date;
+                anchor1DateTime = initialAnchor;
+
+                if (!TryBuildAnchorDateTime(Anchor2Date, Anchor2Time, out initialAnchor))
+                    initialAnchor = Anchor2Date.Date;
+                anchor2DateTime = initialAnchor;
 
                 // Asegurar que los plots usan los colores de las propiedades
                 UpdatePlotBrushes();
@@ -157,24 +163,28 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
 
             // 2) Detectar cambios en las propiedades (fecha/hora) desde el panel
-            DateTime propAnchor1 = BuildAnchorDateTime(Anchor1Date, Anchor1Time);
-            DateTime snappedAnchor1;
-            if (TrySnapAnchor(propAnchor1, out snappedAnchor1) && snappedAnchor1 != anchor1DateTime)
+            DateTime propAnchor1;
+            if (TryBuildAnchorDateTime(Anchor1Date, Anchor1Time, out propAnchor1))
             {
-                anchor1DateTime = snappedAnchor1;
-                Anchor1Date     = anchor1DateTime.Date;
-                Anchor1Time     = anchor1DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
-                ResetAnchor1();
+                DateTime snappedAnchor1;
+                DateTime newAnchor1 = TrySnapAnchor(propAnchor1, out snappedAnchor1) ? snappedAnchor1 : propAnchor1;
+                if (newAnchor1 != anchor1DateTime)
+                {
+                    anchor1DateTime = newAnchor1;
+                    ResetAnchor1();
+                }
             }
 
-            DateTime propAnchor2 = BuildAnchorDateTime(Anchor2Date, Anchor2Time);
-            DateTime snappedAnchor2;
-            if (TrySnapAnchor(propAnchor2, out snappedAnchor2) && snappedAnchor2 != anchor2DateTime)
+            DateTime propAnchor2;
+            if (TryBuildAnchorDateTime(Anchor2Date, Anchor2Time, out propAnchor2))
             {
-                anchor2DateTime = snappedAnchor2;
-                Anchor2Date     = anchor2DateTime.Date;
-                Anchor2Time     = anchor2DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
-                ResetAnchor2();
+                DateTime snappedAnchor2;
+                DateTime newAnchor2 = TrySnapAnchor(propAnchor2, out snappedAnchor2) ? snappedAnchor2 : propAnchor2;
+                if (newAnchor2 != anchor2DateTime)
+                {
+                    anchor2DateTime = newAnchor2;
+                    ResetAnchor2();
+                }
             }
 
             // 3) Dibujar / borrar las líneas verticales de anclaje
@@ -338,13 +348,18 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
         }
 
-        private DateTime BuildAnchorDateTime(DateTime anchorDate, string anchorTime)
+        private bool TryBuildAnchorDateTime(DateTime anchorDate, string anchorTime, out DateTime result)
         {
             TimeSpan ts;
-            if (!TimeSpan.TryParseExact(anchorTime ?? "00:00", "hh\\:mm", CultureInfo.InvariantCulture, out ts))
-                ts = TimeSpan.Zero;
+            bool parsed = TimeSpan.TryParseExact(anchorTime ?? string.Empty, "HH\\:mm", CultureInfo.InvariantCulture, out ts);
+            if (parsed)
+            {
+                result = anchorDate.Date + ts;
+                return true;
+            }
 
-            return anchorDate.Date + ts;
+            result = anchorDate.Date;
+            return false;
         }
 
         private void ResetAnchor1()
@@ -370,23 +385,18 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (Bars == null || CurrentBar < 0)
                 return false;
 
-            int closestBarsAgo = -1;
-            double minDiffMs   = double.MaxValue;
+            DateTime? bestCandidate = null;
 
             for (int barsAgo = 0; barsAgo <= CurrentBar; barsAgo++)
             {
                 DateTime candidate = Time[barsAgo];
-                double diffMs = Math.Abs((candidate - requested).TotalMilliseconds);
-                if (diffMs < minDiffMs)
-                {
-                    minDiffMs      = diffMs;
-                    closestBarsAgo = barsAgo;
-                }
+                if (candidate >= requested && (bestCandidate == null || candidate < bestCandidate.Value))
+                    bestCandidate = candidate;
             }
 
-            if (closestBarsAgo >= 0)
+            if (bestCandidate.HasValue)
             {
-                snapped = Time[closestBarsAgo];
+                snapped = bestCandidate.Value;
                 return true;
             }
 
