@@ -346,7 +346,6 @@ namespace NinjaTrader.NinjaScript.Indicators
         }
         #endregion
 
-        #region NinjaScript generated code. Neither change nor remove.
         public override string DisplayName
         {
             get
@@ -354,7 +353,6 @@ namespace NinjaTrader.NinjaScript.Indicators
                 return base.DisplayName + "";
             }
         }
-        #endregion
     }
 }
 
