@@ -90,16 +90,16 @@ namespace NinjaTrader.NinjaScript.Indicators
                 FreezeBrush(defaultAnchor2Band1);
                 FreezeBrush(defaultAnchor2Band2);
 
-                Brushes[0] = defaultAnchor1Vwap;
-                Brushes[1] = defaultAnchor1Band1;
-                Brushes[2] = defaultAnchor1Band1;
-                Brushes[3] = defaultAnchor1Band2;
-                Brushes[4] = defaultAnchor1Band2;
-                Brushes[5] = defaultAnchor2Vwap;
-                Brushes[6] = defaultAnchor2Band1;
-                Brushes[7] = defaultAnchor2Band1;
-                Brushes[8] = defaultAnchor2Band2;
-                Brushes[9] = defaultAnchor2Band2;
+                Plots[0].Brush = defaultAnchor1Vwap;
+                Plots[1].Brush = defaultAnchor1Band1;
+                Plots[2].Brush = defaultAnchor1Band1;
+                Plots[3].Brush = defaultAnchor1Band2;
+                Plots[4].Brush = defaultAnchor1Band2;
+                Plots[5].Brush = defaultAnchor2Vwap;
+                Plots[6].Brush = defaultAnchor2Band1;
+                Plots[7].Brush = defaultAnchor2Band1;
+                Plots[8].Brush = defaultAnchor2Band2;
+                Plots[9].Brush = defaultAnchor2Band2;
             }
             else if (State == State.DataLoaded)
             {
