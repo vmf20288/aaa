@@ -47,7 +47,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 Anchored2 = false;
 
                 Anchor1Date = DateTime.Today;
-                Anchor1Time = "00:00";
+                Anchor1Time = NormalizeAnchorTime("00:00");
                 ShowAnchor1Bands1 = true;
                 ShowAnchor1Bands2 = false;
                 Anchor1VwapBrush = Brushes.Blue;
@@ -55,7 +55,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 Anchor1Band2Brush = Brushes.Green;
 
                 Anchor2Date = DateTime.Today;
-                Anchor2Time = "00:00";
+                Anchor2Time = NormalizeAnchorTime("00:00");
                 ShowAnchor2Bands1 = true;
                 ShowAnchor2Bands2 = false;
                 Anchor2VwapBrush = Brushes.Blue;
@@ -192,6 +192,11 @@ namespace NinjaTrader.NinjaScript.Indicators
                 Values[plus2Plot][0] = double.NaN;
                 Values[minus2Plot][0] = double.NaN;
             }
+        }
+
+        private string NormalizeAnchorTime(string anchorTime)
+        {
+            return string.IsNullOrWhiteSpace(anchorTime) ? "00:00" : anchorTime;
         }
 
         private DateTime BuildAnchorDateTime(DateTime anchorDate, string anchorTime)
@@ -366,6 +371,9 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         public a2avwap a2avwap(ISeries<double> input, bool showAnchoredVwap, bool anchored1, bool anchored2, DateTime anchor1Date, string anchor1Time, bool showAnchor1Bands1, bool showAnchor1Bands2, DateTime anchor2Date, string anchor2Time, bool showAnchor2Bands1, bool showAnchor2Bands2)
         {
+            anchor1Time = string.IsNullOrWhiteSpace(anchor1Time) ? "00:00" : anchor1Time;
+            anchor2Time = string.IsNullOrWhiteSpace(anchor2Time) ? "00:00" : anchor2Time;
+
             if (cachea2avwap != null)
                 for (int idx = 0; idx < cachea2avwap.Length; idx++)
                     if (cachea2avwap[idx] != null && cachea2avwap[idx].ShowAnchoredVwap == showAnchoredVwap && cachea2avwap[idx].Anchored1 == anchored1 && cachea2avwap[idx].Anchored2 == anchored2 && cachea2avwap[idx].Anchor1Date == anchor1Date && cachea2avwap[idx].Anchor1Time == anchor1Time && cachea2avwap[idx].ShowAnchor1Bands1 == showAnchor1Bands1 && cachea2avwap[idx].ShowAnchor1Bands2 == showAnchor1Bands2 && cachea2avwap[idx].Anchor2Date == anchor2Date && cachea2avwap[idx].Anchor2Time == anchor2Time && cachea2avwap[idx].ShowAnchor2Bands1 == showAnchor2Bands1 && cachea2avwap[idx].ShowAnchor2Bands2 == showAnchor2Bands2 && cachea2avwap[idx].EqualsInput(input))
