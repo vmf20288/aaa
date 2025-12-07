@@ -1,363 +1,504 @@
-// a2avwap.cs - Indicador de doble Anchored VWAP con bandas ±1σ y ±2σ
-// Cálculo sencillo y estable para NinjaTrader 8.
-// - Anchored 1 y Anchored 2 independientes.
-// - Cada uno con fecha, hora, bandas 1 y 2.
-// - ShowAnchoredVwap apaga/enciende todo el indicador.
+// a2avwap.cs - Anchored VWAP doble con bandas y anchors arrastrables
+// - Dos módulos independientes (Anchored 1 y Anchored 2)
+// - Cada módulo tiene fecha/hora de anclaje, bandas ±1σ y ±2σ
+// - Línea vertical en el punto de anclaje, que se puede mover con el ratón
+// - Cálculo en OnBarClose para reducir carga
 
-#region Using declarations
 using System;
 using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Windows.Media;
+using System.Xml.Serialization;
 using NinjaTrader.Data;
 using NinjaTrader.Gui.NinjaScript;
+using NinjaTrader.Gui.Tools;
 using NinjaTrader.NinjaScript;
-#endregion
+using NinjaTrader.NinjaScript.Indicators;
+using NinjaTrader.NinjaScript.DrawingTools;
 
 namespace NinjaTrader.NinjaScript.Indicators
 {
     public class a2avwap : Indicator
     {
-        // --- Sumas para módulo 1 ---
-        private double a1SumPV;    // Σ (precio * volumen)
-        private double a1SumV;     // Σ volumen
-        private double a1SumP2V;   // Σ (precio^2 * volumen)
-        private bool   a1Active;
+        // --- Acumuladores módulo 1 ---
+        private double anchor1SumPV;
+        private double anchor1SumV;
+        private double anchor1SumP2V;
+        private bool   anchor1Active;
 
-        // --- Sumas para módulo 2 ---
-        private double a2SumPV;
-        private double a2SumV;
-        private double a2SumP2V;
-        private bool   a2Active;
+        // --- Acumuladores módulo 2 ---
+        private double anchor2SumPV;
+        private double anchor2SumV;
+        private double anchor2SumP2V;
+        private bool   anchor2Active;
 
-        // --- Métodos auxiliares de fecha/hora ---
-        private DateTime BuildAnchorDateTime(DateTime date, string timeText)
-        {
-            if (string.IsNullOrEmpty(timeText))
-                timeText = "00:00";
+        // DateTime interno efectivo (propiedades + drag)
+        private DateTime anchor1DateTime;
+        private DateTime anchor2DateTime;
 
-            TimeSpan ts;
-            if (!TimeSpan.TryParseExact(timeText, "hh\\:mm", CultureInfo.InvariantCulture, out ts) &&
-                !TimeSpan.TryParseExact(timeText, "HH\\:mm", CultureInfo.InvariantCulture, out ts))
-            {
-                ts = TimeSpan.Zero;
-            }
+        // Líneas verticales (para drag con el ratón)
+        private VerticalLine anchor1Line;
+        private VerticalLine anchor2Line;
 
-            return date.Date + ts;
-        }
-
-        private void ResetAnchor1()
-        {
-            a1SumPV  = 0;
-            a1SumV   = 0;
-            a1SumP2V = 0;
-            a1Active = false;
-        }
-
-        private void ResetAnchor2()
-        {
-            a2SumPV  = 0;
-            a2SumV   = 0;
-            a2SumP2V = 0;
-            a2Active = false;
-        }
-
-        private void SetNaNAnchor1()
-        {
-            // Plots 0-4 pertenecen a Anchored 1
-            for (int i = 0; i <= 4; i++)
-                Values[i][0] = double.NaN;
-        }
-
-        private void SetNaNAnchor2()
-        {
-            // Plots 5-9 pertenecen a Anchored 2
-            for (int i = 5; i <= 9; i++)
-                Values[i][0] = double.NaN;
-        }
-
-        private void SetNaNAll()
-        {
-            for (int i = 0; i < Values.Length; i++)
-                Values[i][0] = double.NaN;
-        }
-
-        // ---------------------------------------------------------
-        // STATE
-        // ---------------------------------------------------------
         protected override void OnStateChange()
         {
             if (State == State.SetDefaults)
             {
                 Name                    = "a2avwap";
-                Calculate               = Calculate.OnBarClose;   // VWAP por cierre de vela
+                Calculate               = Calculate.OnBarClose;   // más ligero
                 IsOverlay               = true;
                 IsSuspendedWhileInactive = true;
 
-                // --- Parámetros Globales ---
+                // --- GLOBAL ---
                 ShowAnchoredVwap        = true;
                 Anchored1               = true;
                 Anchored2               = false;
 
-                // --- Parámetros Anchored 1 ---
+                // --- Anchored VWAP 1 ---
                 Anchor1Date             = DateTime.Today;
                 Anchor1Time             = "00:00";
                 ShowAnchor1Bands1       = true;
                 ShowAnchor1Bands2       = false;
 
-                // --- Parámetros Anchored 2 ---
+                // --- Anchored VWAP 2 ---
                 Anchor2Date             = DateTime.Today;
                 Anchor2Time             = "00:00";
                 ShowAnchor2Bands1       = true;
                 ShowAnchor2Bands2       = false;
 
-                // --- Plots ---
-                // Anchored 1
-                AddPlot(Brushes.Blue,      "AnchoredVWAP1"); // 0
-                AddPlot(Brushes.Green,     "Anch1 +1σ");     // 1
-                AddPlot(Brushes.Green,     "Anch1 -1σ");     // 2
-                AddPlot(Brushes.DarkGreen, "Anch1 +2σ");     // 3
-                AddPlot(Brushes.DarkGreen, "Anch1 -2σ");     // 4
+                // Colores por defecto
+                Anchor1VwapBrush        = Brushes.Blue;
+                Anchor1Band1Brush       = Brushes.Green;
+                Anchor1Band2Brush       = Brushes.Green;
 
-                // Anchored 2
-                AddPlot(Brushes.SteelBlue, "AnchoredVWAP2"); // 5
-                AddPlot(Brushes.ForestGreen, "Anch2 +1σ");   // 6
-                AddPlot(Brushes.ForestGreen, "Anch2 -1σ");   // 7
-                AddPlot(Brushes.OliveDrab,   "Anch2 +2σ");   // 8
-                AddPlot(Brushes.OliveDrab,   "Anch2 -2σ");   // 9
+                Anchor2VwapBrush        = Brushes.Blue;
+                Anchor2Band1Brush       = Brushes.Green;
+                Anchor2Band2Brush       = Brushes.Green;
+
+                // Plots módulo 1
+                AddPlot(Brushes.Blue,  "AnchoredVWAP1");   // 0
+                AddPlot(Brushes.Green, "Anch1+1");         // 1
+                AddPlot(Brushes.Green, "Anch1-1");         // 2
+                AddPlot(Brushes.Green, "Anch1+2");         // 3
+                AddPlot(Brushes.Green, "Anch1-2");         // 4
+
+                // Plots módulo 2
+                AddPlot(Brushes.Blue,  "AnchoredVWAP2");   // 5
+                AddPlot(Brushes.Green, "Anch2+1");         // 6
+                AddPlot(Brushes.Green, "Anch2-1");         // 7
+                AddPlot(Brushes.Green, "Anch2+2");         // 8
+                AddPlot(Brushes.Green, "Anch2-2");         // 9
             }
             else if (State == State.DataLoaded)
             {
+                // Construir DateTime inicial desde propiedades
+                anchor1DateTime = BuildAnchorDateTime(Anchor1Date, Anchor1Time);
+                anchor2DateTime = BuildAnchorDateTime(Anchor2Date, Anchor2Time);
+
+                // Asegurar que los plots usan los colores de las propiedades
+                UpdatePlotBrushes();
+
                 ResetAnchor1();
                 ResetAnchor2();
             }
+            else if (State == State.Terminated)
+            {
+                // Limpiar las líneas al quitar el indicador
+                RemoveDrawObject("a2avwap_Anchor1");
+                RemoveDrawObject("a2avwap_Anchor2");
+            }
         }
 
-        // ---------------------------------------------------------
-        // LÓGICA PRINCIPAL
-        // ---------------------------------------------------------
         protected override void OnBarUpdate()
         {
-            if (CurrentBar < 0)
-                return;
-
-            // Si el usuario apaga todo el indicador
             if (!ShowAnchoredVwap)
             {
-                SetNaNAll();
-                ResetAnchor1();
-                ResetAnchor2();
+                SetAllNan();
+                // No dibujar líneas ni acumular cuando está apagado global
+                if (ChartControl != null)
+                {
+                    RemoveDrawObject("a2avwap_Anchor1");
+                    RemoveDrawObject("a2avwap_Anchor2");
+                }
                 return;
             }
 
-            DateTime barTime    = Time[0];
-            DateTime anchor1DT  = BuildAnchorDateTime(Anchor1Date, Anchor1Time);
-            DateTime anchor2DT  = BuildAnchorDateTime(Anchor2Date, Anchor2Time);
+            // 1) Detectar si el usuario ha movido las líneas con el ratón
+            if (ChartControl != null)
+            {
+                if (anchor1Line != null && Anchored1)
+                {
+                    DateTime lineTime = anchor1Line.StartAnchor.Time;
+                    if (lineTime != anchor1DateTime)
+                    {
+                        anchor1DateTime = lineTime;
+                        Anchor1Date     = anchor1DateTime.Date;
+                        Anchor1Time     = anchor1DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
+                        ResetAnchor1();
+                    }
+                }
 
-            double price  = (Open[0] + High[0] + Low[0] + Close[0]) / 4.0;   // precio típico
+                if (anchor2Line != null && Anchored2)
+                {
+                    DateTime lineTime = anchor2Line.StartAnchor.Time;
+                    if (lineTime != anchor2DateTime)
+                    {
+                        anchor2DateTime = lineTime;
+                        Anchor2Date     = anchor2DateTime.Date;
+                        Anchor2Time     = anchor2DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
+                        ResetAnchor2();
+                    }
+                }
+            }
+
+            // 2) Detectar cambios en las propiedades (fecha/hora) desde el panel
+            DateTime propAnchor1 = BuildAnchorDateTime(Anchor1Date, Anchor1Time);
+            if (propAnchor1 != anchor1DateTime)
+            {
+                anchor1DateTime = propAnchor1;
+                ResetAnchor1();
+            }
+
+            DateTime propAnchor2 = BuildAnchorDateTime(Anchor2Date, Anchor2Time);
+            if (propAnchor2 != anchor2DateTime)
+            {
+                anchor2DateTime = propAnchor2;
+                ResetAnchor2();
+            }
+
+            // 3) Dibujar / borrar las líneas verticales de anclaje
+            if (ChartControl != null)
+            {
+                if (Anchored1)
+                {
+                    anchor1Line = Draw.VerticalLine(this, "a2avwap_Anchor1", anchor1DateTime, Anchor1VwapBrush);
+                    if (anchor1Line != null)
+                        anchor1Line.IsLocked = false; // para poder arrastrar
+                }
+                else
+                {
+                    RemoveDrawObject("a2avwap_Anchor1");
+                    anchor1Line = null;
+                }
+
+                if (Anchored2)
+                {
+                    anchor2Line = Draw.VerticalLine(this, "a2avwap_Anchor2", anchor2DateTime, Anchor2VwapBrush);
+                    if (anchor2Line != null)
+                        anchor2Line.IsLocked = false;
+                }
+                else
+                {
+                    RemoveDrawObject("a2avwap_Anchor2");
+                    anchor2Line = null;
+                }
+            }
+
+            // 4) Cálculo del precio medio (típico) y volumen de la barra
+            double price  = (Open[0] + High[0] + Low[0] + Close[0]) / 4.0;
             double volume = Volume[0];
 
-            // -----------------------------------------------------
-            // ANCHORED 1
-            // -----------------------------------------------------
-            if (!Anchored1)
+            // 5) Procesar cada módulo
+            ProcessModule(
+                ref anchor1Active,
+                ref anchor1SumPV,
+                ref anchor1SumV,
+                ref anchor1SumP2V,
+                anchor1DateTime,
+                Anchored1,
+                ShowAnchor1Bands1,
+                ShowAnchor1Bands2,
+                0, 1, 2, 3, 4,
+                price, volume);
+
+            ProcessModule(
+                ref anchor2Active,
+                ref anchor2SumPV,
+                ref anchor2SumV,
+                ref anchor2SumP2V,
+                anchor2DateTime,
+                Anchored2,
+                ShowAnchor2Bands1,
+                ShowAnchor2Bands2,
+                5, 6, 7, 8, 9,
+                price, volume);
+        }
+
+        /// <summary>
+        /// Lógica común para cada módulo de Anchored VWAP
+        /// </summary>
+        private void ProcessModule(
+            ref bool moduleActive,
+            ref double sumPV,
+            ref double sumV,
+            ref double sumP2V,
+            DateTime anchorDateTime,
+            bool isEnabled,
+            bool showBands1,
+            bool showBands2,
+            int vwapPlot,
+            int plus1Plot,
+            int minus1Plot,
+            int plus2Plot,
+            int minus2Plot,
+            double price,
+            double volume)
+        {
+            if (!isEnabled)
             {
-                ResetAnchor1();
-                SetNaNAnchor1();
+                Values[vwapPlot][0]  = double.NaN;
+                Values[plus1Plot][0] = double.NaN;
+                Values[minus1Plot][0]= double.NaN;
+                Values[plus2Plot][0] = double.NaN;
+                Values[minus2Plot][0]= double.NaN;
+                return;
+            }
+
+            // Activar el módulo cuando llegamos al tiempo de anclaje
+            if (!moduleActive && Time[0] >= anchorDateTime)
+            {
+                sumPV    = 0.0;
+                sumV     = 0.0;
+                sumP2V   = 0.0;
+                moduleActive = true;
+            }
+
+            if (!moduleActive)
+            {
+                Values[vwapPlot][0]  = double.NaN;
+                Values[plus1Plot][0] = double.NaN;
+                Values[minus1Plot][0]= double.NaN;
+                Values[plus2Plot][0] = double.NaN;
+                Values[minus2Plot][0]= double.NaN;
+                return;
+            }
+
+            // Acumulación volumen ponderado
+            if (volume > 0)
+            {
+                sumPV  += price * volume;
+                sumV   += volume;
+                sumP2V += price * price * volume;
+            }
+
+            double vwap;
+            double stdDev;
+
+            if (sumV == 0)
+            {
+                vwap   = price;
+                stdDev = 0.0;
             }
             else
             {
-                // Activar ancla cuando se alcanza la fecha/hora
-                if (!a1Active && barTime >= anchor1DT)
-                {
-                    ResetAnchor1();
-                    a1Active = true;
-                }
-
-                if (!a1Active)
-                {
-                    SetNaNAnchor1();
-                }
-                else
-                {
-                    if (volume > 0)
-                    {
-                        a1SumPV  += price * volume;
-                        a1SumV   += volume;
-                        a1SumP2V += price * price * volume;
-                    }
-
-                    if (a1SumV > 0)
-                    {
-                        double vwap1    = a1SumPV / a1SumV;
-                        double variance = (a1SumP2V / a1SumV) - vwap1 * vwap1;
-                        if (variance < 0)
-                            variance = 0;
-                        double sigma    = Math.Sqrt(variance);
-
-                        // VWAP
-                        Values[0][0] = vwap1;
-
-                        // Bandas ±1σ
-                        if (ShowAnchor1Bands1)
-                        {
-                            Values[1][0] = vwap1 + sigma;
-                            Values[2][0] = vwap1 - sigma;
-                        }
-                        else
-                        {
-                            Values[1][0] = double.NaN;
-                            Values[2][0] = double.NaN;
-                        }
-
-                        // Bandas ±2σ
-                        if (ShowAnchor1Bands2)
-                        {
-                            Values[3][0] = vwap1 + 2.0 * sigma;
-                            Values[4][0] = vwap1 - 2.0 * sigma;
-                        }
-                        else
-                        {
-                            Values[3][0] = double.NaN;
-                            Values[4][0] = double.NaN;
-                        }
-                    }
-                    else
-                    {
-                        SetNaNAnchor1();
-                    }
-                }
+                vwap = sumPV / sumV;
+                double meanP2 = sumP2V / sumV;
+                double variance = meanP2 - vwap * vwap;
+                if (variance < 0)
+                    variance = 0;
+                stdDev = Math.Sqrt(variance);
             }
 
-            // -----------------------------------------------------
-            // ANCHORED 2
-            // -----------------------------------------------------
-            if (!Anchored2)
+            // VWAP principal
+            Values[vwapPlot][0] = vwap;
+
+            // Bandas ±1σ
+            if (showBands1)
             {
-                ResetAnchor2();
-                SetNaNAnchor2();
+                Values[plus1Plot][0]  = vwap + stdDev;
+                Values[minus1Plot][0] = vwap - stdDev;
             }
             else
             {
-                // Activar ancla cuando se alcanza la fecha/hora
-                if (!a2Active && barTime >= anchor2DT)
-                {
-                    ResetAnchor2();
-                    a2Active = true;
-                }
+                Values[plus1Plot][0]  = double.NaN;
+                Values[minus1Plot][0] = double.NaN;
+            }
 
-                if (!a2Active)
-                {
-                    SetNaNAnchor2();
-                }
-                else
-                {
-                    if (volume > 0)
-                    {
-                        a2SumPV  += price * volume;
-                        a2SumV   += volume;
-                        a2SumP2V += price * price * volume;
-                    }
-
-                    if (a2SumV > 0)
-                    {
-                        double vwap2    = a2SumPV / a2SumV;
-                        double variance = (a2SumP2V / a2SumV) - vwap2 * vwap2;
-                        if (variance < 0)
-                            variance = 0;
-                        double sigma    = Math.Sqrt(variance);
-
-                        // VWAP
-                        Values[5][0] = vwap2;
-
-                        // Bandas ±1σ
-                        if (ShowAnchor2Bands1)
-                        {
-                            Values[6][0] = vwap2 + sigma;
-                            Values[7][0] = vwap2 - sigma;
-                        }
-                        else
-                        {
-                            Values[6][0] = double.NaN;
-                            Values[7][0] = double.NaN;
-                        }
-
-                        // Bandas ±2σ
-                        if (ShowAnchor2Bands2)
-                        {
-                            Values[8][0] = vwap2 + 2.0 * sigma;
-                            Values[9][0] = vwap2 - 2.0 * sigma;
-                        }
-                        else
-                        {
-                            Values[8][0] = double.NaN;
-                            Values[9][0] = double.NaN;
-                        }
-                    }
-                    else
-                    {
-                        SetNaNAnchor2();
-                    }
-                }
+            // Bandas ±2σ
+            if (showBands2)
+            {
+                Values[plus2Plot][0]  = vwap + 2.0 * stdDev;
+                Values[minus2Plot][0] = vwap - 2.0 * stdDev;
+            }
+            else
+            {
+                Values[plus2Plot][0]  = double.NaN;
+                Values[minus2Plot][0] = double.NaN;
             }
         }
 
-        // ---------------------------------------------------------
-        // PROPIEDADES (aparecen en el panel de parámetros)
-        // ---------------------------------------------------------
+        private DateTime BuildAnchorDateTime(DateTime anchorDate, string anchorTime)
+        {
+            TimeSpan ts;
+            if (!TimeSpan.TryParseExact(anchorTime ?? "00:00", "hh\\:mm", CultureInfo.InvariantCulture, out ts))
+                ts = TimeSpan.Zero;
 
-        // --- GLOBAL ---
+            return anchorDate.Date + ts;
+        }
+
+        private void ResetAnchor1()
+        {
+            anchor1SumPV  = 0.0;
+            anchor1SumV   = 0.0;
+            anchor1SumP2V = 0.0;
+            anchor1Active = false;
+        }
+
+        private void ResetAnchor2()
+        {
+            anchor2SumPV  = 0.0;
+            anchor2SumV   = 0.0;
+            anchor2SumP2V = 0.0;
+            anchor2Active = false;
+        }
+
+        private void SetAllNan()
+        {
+            for (int i = 0; i < Values.Length; i++)
+                Values[i][0] = double.NaN;
+        }
+
+        private void UpdatePlotBrushes()
+        {
+            if (Plots == null || Plots.Count < 10)
+                return;
+
+            // Módulo 1
+            Plots[0].Brush = Anchor1VwapBrush;
+            Plots[1].Brush = Anchor1Band1Brush;
+            Plots[2].Brush = Anchor1Band1Brush;
+            Plots[3].Brush = Anchor1Band2Brush;
+            Plots[4].Brush = Anchor1Band2Brush;
+
+            // Módulo 2
+            Plots[5].Brush = Anchor2VwapBrush;
+            Plots[6].Brush = Anchor2Band1Brush;
+            Plots[7].Brush = Anchor2Band1Brush;
+            Plots[8].Brush = Anchor2Band2Brush;
+            Plots[9].Brush = Anchor2Band2Brush;
+        }
+
+        #region Propiedades
+
+        // --- Global ---
         [NinjaScriptProperty]
-        [DisplayName("Show Anchored VWAP")]
-        [Description("Muestra u oculta todo el indicador.")]
+        [Display(Name = "Show Anchored VWAP", Order = 0, GroupName = "GLOBAL")]
         public bool ShowAnchoredVwap { get; set; }
 
         [NinjaScriptProperty]
-        [DisplayName("Anchored 1")]
-        [Description("Activa el primer VWAP anclado.")]
+        [Display(Name = "Anchored 1", Order = 1, GroupName = "GLOBAL")]
         public bool Anchored1 { get; set; }
 
         [NinjaScriptProperty]
-        [DisplayName("Anchored 2")]
-        [Description("Activa el segundo VWAP anclado.")]
+        [Display(Name = "Anchored 2", Order = 2, GroupName = "GLOBAL")]
         public bool Anchored2 { get; set; }
 
-        // --- ANCHORED VWAP 1 ---
+        // --- Anchored VWAP 1 ---
         [NinjaScriptProperty]
-        [DisplayName("Anchor 1 Date")]
+        [Display(Name = "Anchor 1 Date", Order = 0, GroupName = "Anchored VWAP 1")]
         public DateTime Anchor1Date { get; set; }
 
         [NinjaScriptProperty]
-        [DisplayName("Anchor 1 Time (HH:mm)")]
+        [Display(Name = "Anchor 1 Time (HH:mm)", Order = 1, GroupName = "Anchored VWAP 1")]
         public string Anchor1Time { get; set; }
 
         [NinjaScriptProperty]
-        [DisplayName("Show Bands 1 ±1σ (A1)")]
+        [Display(Name = "Show Anchored Bands 1 (±1σ)", Order = 2, GroupName = "Anchored VWAP 1")]
         public bool ShowAnchor1Bands1 { get; set; }
 
         [NinjaScriptProperty]
-        [DisplayName("Show Bands 2 ±2σ (A1)")]
+        [Display(Name = "Show Anchored Bands 2 (±2σ)", Order = 3, GroupName = "Anchored VWAP 1")]
         public bool ShowAnchor1Bands2 { get; set; }
 
-        // --- ANCHORED VWAP 2 ---
+        // --- Anchored VWAP 2 ---
         [NinjaScriptProperty]
-        [DisplayName("Anchor 2 Date")]
+        [Display(Name = "Anchor 2 Date", Order = 0, GroupName = "Anchored VWAP 2")]
         public DateTime Anchor2Date { get; set; }
 
         [NinjaScriptProperty]
-        [DisplayName("Anchor 2 Time (HH:mm)")]
+        [Display(Name = "Anchor 2 Time (HH:mm)", Order = 1, GroupName = "Anchored VWAP 2")]
         public string Anchor2Time { get; set; }
 
         [NinjaScriptProperty]
-        [DisplayName("Show Bands 1 ±1σ (A2)")]
+        [Display(Name = "Show Anchored Bands 1 (±1σ)", Order = 2, GroupName = "Anchored VWAP 2")]
         public bool ShowAnchor2Bands1 { get; set; }
 
         [NinjaScriptProperty]
-        [DisplayName("Show Bands 2 ±2σ (A2)")]
+        [Display(Name = "Show Anchored Bands 2 (±2σ)", Order = 3, GroupName = "Anchored VWAP 2")]
         public bool ShowAnchor2Bands2 { get; set; }
+
+        // --- Colores Anchored 1 ---
+        [XmlIgnore]
+        [Display(Name = "Anchored VWAP 1 Color", Order = 0, GroupName = "Anchored VWAP 1 Colors")]
+        public Brush Anchor1VwapBrush { get; set; }
+
+        [Browsable(false)]
+        public string Anchor1VwapBrushSerializable
+        {
+            get { return Serialize.BrushToString(Anchor1VwapBrush); }
+            set { Anchor1VwapBrush = Serialize.StringToBrush(value); }
+        }
+
+        [XmlIgnore]
+        [Display(Name = "Anch 1 ±1σ Color", Order = 1, GroupName = "Anchored VWAP 1 Colors")]
+        public Brush Anchor1Band1Brush { get; set; }
+
+        [Browsable(false)]
+        public string Anchor1Band1BrushSerializable
+        {
+            get { return Serialize.BrushToString(Anchor1Band1Brush); }
+            set { Anchor1Band1Brush = Serialize.StringToBrush(value); }
+        }
+
+        [XmlIgnore]
+        [Display(Name = "Anch 1 ±2σ Color", Order = 2, GroupName = "Anchored VWAP 1 Colors")]
+        public Brush Anchor1Band2Brush { get; set; }
+
+        [Browsable(false)]
+        public string Anchor1Band2BrushSerializable
+        {
+            get { return Serialize.BrushToString(Anchor1Band2Brush); }
+            set { Anchor1Band2Brush = Serialize.StringToBrush(value); }
+        }
+
+        // --- Colores Anchored 2 ---
+        [XmlIgnore]
+        [Display(Name = "Anchored VWAP 2 Color", Order = 0, GroupName = "Anchored VWAP 2 Colors")]
+        public Brush Anchor2VwapBrush { get; set; }
+
+        [Browsable(false)]
+        public string Anchor2VwapBrushSerializable
+        {
+            get { return Serialize.BrushToString(Anchor2VwapBrush); }
+            set { Anchor2VwapBrush = Serialize.StringToBrush(value); }
+        }
+
+        [XmlIgnore]
+        [Display(Name = "Anch 2 ±1σ Color", Order = 1, GroupName = "Anchored VWAP 2 Colors")]
+        public Brush Anchor2Band1Brush { get; set; }
+
+        [Browsable(false)]
+        public string Anchor2Band1BrushSerializable
+        {
+            get { return Serialize.BrushToString(Anchor2Band1Brush); }
+            set { Anchor2Band1Brush = Serialize.StringToBrush(value); }
+        }
+
+        [XmlIgnore]
+        [Display(Name = "Anch 2 ±2σ Color", Order = 2, GroupName = "Anchored VWAP 2 Colors")]
+        public Brush Anchor2Band2Brush { get; set; }
+
+        [Browsable(false)]
+        public string Anchor2Band2BrushSerializable
+        {
+            get { return Serialize.BrushToString(Anchor2Band2Brush); }
+            set { Anchor2Band2Brush = Serialize.StringToBrush(value); }
+        }
+
+        #endregion
     }
 }
-
 
 #region NinjaScript generated code. Neither change nor remove.
 
