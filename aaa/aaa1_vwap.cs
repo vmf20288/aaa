@@ -58,7 +58,16 @@ namespace NinjaTrader.NinjaScript.Indicators
         [NinjaScriptProperty]
         [Display(Name = "Anchor Time (HH:mm)", Order = 2, GroupName = "Anchored VWAP")]
         [RegularExpression("^([01]?[0-9]|2[0-3]):[0-5][0-9]$", ErrorMessage = "Formato HH:mm")]
-        public string AnchorTime { get; set; } = "00:00";
+        public string AnchorTime
+        {
+            get => anchorTime;
+            set => anchorTime = NormalizeAnchorTime(value);
+        }
+
+        internal static string NormalizeAnchorTime(string time)
+        {
+            return string.IsNullOrWhiteSpace(time) ? "00:00" : time;
+        }
 
         private double wSumPV, wSumV, wSumVarPV;
         private double sSumPV, sSumV, sSumVarPV;
@@ -66,6 +75,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         private double aSumP2V;
         private bool anchorActive;
         private double prevVol;
+        private string anchorTime = "00:00";
 
         private DateTime AnchorDateTime => DateTime.TryParse(AnchorTime, out var t)
             ? AnchorDate.Date.Add(t.TimeOfDay)
@@ -216,16 +226,20 @@ namespace NinjaTrader.NinjaScript.Indicators
         private aaa1_vwap[] cacheaaa1_vwap;
         public aaa1_vwap aaa1_vwap(bool showWeekly, bool showWeeklyBands1, bool showWeeklyBands2, bool showSession, bool showSessionBands1, bool showSessionBands2, bool showAnchored, DateTime anchorDate, string anchorTime, bool showAnchoredBands1, bool showAnchoredBands2)
         {
-            return aaa1_vwap(Input, showWeekly, showWeeklyBands1, showWeeklyBands2, showSession, showSessionBands1, showSessionBands2, showAnchored, anchorDate, anchorTime, showAnchoredBands1, showAnchoredBands2);
+            string anchorTimeSafe = aaa1_vwap.NormalizeAnchorTime(anchorTime);
+
+            return aaa1_vwap(Input, showWeekly, showWeeklyBands1, showWeeklyBands2, showSession, showSessionBands1, showSessionBands2, showAnchored, anchorDate, anchorTimeSafe, showAnchoredBands1, showAnchoredBands2);
         }
 
         public aaa1_vwap aaa1_vwap(ISeries<double> input, bool showWeekly, bool showWeeklyBands1, bool showWeeklyBands2, bool showSession, bool showSessionBands1, bool showSessionBands2, bool showAnchored, DateTime anchorDate, string anchorTime, bool showAnchoredBands1, bool showAnchoredBands2)
         {
+            string anchorTimeSafe = aaa1_vwap.NormalizeAnchorTime(anchorTime);
+
             if (cacheaaa1_vwap != null)
                 for (int idx = 0; idx < cacheaaa1_vwap.Length; idx++)
-                    if (cacheaaa1_vwap[idx] != null && cacheaaa1_vwap[idx].ShowWeekly == showWeekly && cacheaaa1_vwap[idx].ShowWeeklyBands1 == showWeeklyBands1 && cacheaaa1_vwap[idx].ShowWeeklyBands2 == showWeeklyBands2 && cacheaaa1_vwap[idx].ShowSession == showSession && cacheaaa1_vwap[idx].ShowSessionBands1 == showSessionBands1 && cacheaaa1_vwap[idx].ShowSessionBands2 == showSessionBands2 && cacheaaa1_vwap[idx].ShowAnchored == showAnchored && cacheaaa1_vwap[idx].AnchorDate == anchorDate && cacheaaa1_vwap[idx].AnchorTime == anchorTime && cacheaaa1_vwap[idx].ShowAnchoredBands1 == showAnchoredBands1 && cacheaaa1_vwap[idx].ShowAnchoredBands2 == showAnchoredBands2 && cacheaaa1_vwap[idx].EqualsInput(input))
+                    if (cacheaaa1_vwap[idx] != null && cacheaaa1_vwap[idx].ShowWeekly == showWeekly && cacheaaa1_vwap[idx].ShowWeeklyBands1 == showWeeklyBands1 && cacheaaa1_vwap[idx].ShowWeeklyBands2 == showWeeklyBands2 && cacheaaa1_vwap[idx].ShowSession == showSession && cacheaaa1_vwap[idx].ShowSessionBands1 == showSessionBands1 && cacheaaa1_vwap[idx].ShowSessionBands2 == showSessionBands2 && cacheaaa1_vwap[idx].ShowAnchored == showAnchored && cacheaaa1_vwap[idx].AnchorDate == anchorDate && cacheaaa1_vwap[idx].AnchorTime == anchorTimeSafe && cacheaaa1_vwap[idx].ShowAnchoredBands1 == showAnchoredBands1 && cacheaaa1_vwap[idx].ShowAnchoredBands2 == showAnchoredBands2 && cacheaaa1_vwap[idx].EqualsInput(input))
                         return cacheaaa1_vwap[idx];
-            return CacheIndicator<aaa1_vwap>(new aaa1_vwap() { ShowWeekly = showWeekly, ShowWeeklyBands1 = showWeeklyBands1, ShowWeeklyBands2 = showWeeklyBands2, ShowSession = showSession, ShowSessionBands1 = showSessionBands1, ShowSessionBands2 = showSessionBands2, ShowAnchored = showAnchored, AnchorDate = anchorDate, AnchorTime = anchorTime, ShowAnchoredBands1 = showAnchoredBands1, ShowAnchoredBands2 = showAnchoredBands2 }, input, ref cacheaaa1_vwap);
+            return CacheIndicator<aaa1_vwap>(new aaa1_vwap() { ShowWeekly = showWeekly, ShowWeeklyBands1 = showWeeklyBands1, ShowWeeklyBands2 = showWeeklyBands2, ShowSession = showSession, ShowSessionBands1 = showSessionBands1, ShowSessionBands2 = showSessionBands2, ShowAnchored = showAnchored, AnchorDate = anchorDate, AnchorTime = anchorTimeSafe, ShowAnchoredBands1 = showAnchoredBands1, ShowAnchoredBands2 = showAnchoredBands2 }, input, ref cacheaaa1_vwap);
         }
     }
 }
