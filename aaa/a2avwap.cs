@@ -93,14 +93,8 @@ namespace NinjaTrader.NinjaScript.Indicators
             else if (State == State.DataLoaded)
             {
                 // Construir DateTime inicial desde propiedades
-                DateTime initialAnchor;
-                if (!TryBuildAnchorDateTime(Anchor1Date, Anchor1Time, out initialAnchor))
-                    initialAnchor = Anchor1Date.Date;
-                anchor1DateTime = initialAnchor;
-
-                if (!TryBuildAnchorDateTime(Anchor2Date, Anchor2Time, out initialAnchor))
-                    initialAnchor = Anchor2Date.Date;
-                anchor2DateTime = initialAnchor;
+                anchor1DateTime = BuildAnchorDateTime(Anchor1Date, Anchor1Time, anchor1DateTime == default(DateTime) ? Anchor1Date.Date : anchor1DateTime, out _);
+                anchor2DateTime = BuildAnchorDateTime(Anchor2Date, Anchor2Time, anchor2DateTime == default(DateTime) ? Anchor2Date.Date : anchor2DateTime, out _);
 
                 // Asegurar que los plots usan los colores de las propiedades
                 UpdatePlotBrushes();
@@ -163,28 +157,22 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
 
             // 2) Detectar cambios en las propiedades (fecha/hora) desde el panel
-            DateTime propAnchor1;
-            if (TryBuildAnchorDateTime(Anchor1Date, Anchor1Time, out propAnchor1))
+            DateTime propAnchor1 = BuildAnchorDateTime(Anchor1Date, Anchor1Time, anchor1DateTime, out _);
+            DateTime snappedAnchor1;
+            DateTime newAnchor1 = TrySnapAnchor(propAnchor1, out snappedAnchor1) ? snappedAnchor1 : propAnchor1;
+            if (newAnchor1 != anchor1DateTime)
             {
-                DateTime snappedAnchor1;
-                DateTime newAnchor1 = TrySnapAnchor(propAnchor1, out snappedAnchor1) ? snappedAnchor1 : propAnchor1;
-                if (newAnchor1 != anchor1DateTime)
-                {
-                    anchor1DateTime = newAnchor1;
-                    ResetAnchor1();
-                }
+                anchor1DateTime = newAnchor1;
+                ResetAnchor1();
             }
 
-            DateTime propAnchor2;
-            if (TryBuildAnchorDateTime(Anchor2Date, Anchor2Time, out propAnchor2))
+            DateTime propAnchor2 = BuildAnchorDateTime(Anchor2Date, Anchor2Time, anchor2DateTime, out _);
+            DateTime snappedAnchor2;
+            DateTime newAnchor2 = TrySnapAnchor(propAnchor2, out snappedAnchor2) ? snappedAnchor2 : propAnchor2;
+            if (newAnchor2 != anchor2DateTime)
             {
-                DateTime snappedAnchor2;
-                DateTime newAnchor2 = TrySnapAnchor(propAnchor2, out snappedAnchor2) ? snappedAnchor2 : propAnchor2;
-                if (newAnchor2 != anchor2DateTime)
-                {
-                    anchor2DateTime = newAnchor2;
-                    ResetAnchor2();
-                }
+                anchor2DateTime = newAnchor2;
+                ResetAnchor2();
             }
 
             // 3) Dibujar / borrar las líneas verticales de anclaje
@@ -348,18 +336,23 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
         }
 
-        private bool TryBuildAnchorDateTime(DateTime anchorDate, string anchorTime, out DateTime result)
+        private DateTime BuildAnchorDateTime(DateTime anchorDate, string anchorTime, DateTime previousAnchor, out bool parsed)
         {
             TimeSpan ts;
-            bool parsed = TimeSpan.TryParseExact(anchorTime ?? string.Empty, "HH\\:mm", CultureInfo.InvariantCulture, out ts);
-            if (parsed)
-            {
-                result = anchorDate.Date + ts;
-                return true;
-            }
+            parsed = TryParseAnchorTime(anchorTime, out ts);
+            TimeSpan timeComponent = parsed ? ts : previousAnchor.TimeOfDay;
+            return anchorDate.Date + timeComponent;
+        }
 
-            result = anchorDate.Date;
-            return false;
+        private bool TryParseAnchorTime(string anchorTime, out TimeSpan result)
+        {
+            string timeText = (anchorTime ?? string.Empty).Trim();
+            string[] formats = new[] { "H\\:mm", "HH\\:mm", "H\\:m", "HH\\:m" };
+
+            if (TimeSpan.TryParseExact(timeText, formats, CultureInfo.InvariantCulture, out result))
+                return true;
+
+            return TimeSpan.TryParse(timeText, CultureInfo.InvariantCulture, out result);
         }
 
         private void ResetAnchor1()
