@@ -361,7 +361,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private void UpdatePlotBrushes()
         {
-            if (Plots == null || Plots.Count < 10)
+            if (Plots == null || Plots.Length < 10)
                 return;
 
             // Módulo 1
@@ -377,6 +377,28 @@ namespace NinjaTrader.NinjaScript.Indicators
             Plots[7].Brush = Anchor2Band1Brush;
             Plots[8].Brush = Anchor2Band2Brush;
             Plots[9].Brush = Anchor2Band2Brush;
+        }
+
+        private static class Serialize
+        {
+            private static readonly BrushConverter BrushConverter = new BrushConverter();
+
+            public static string BrushToString(Brush brush)
+            {
+                return BrushConverter.ConvertToString(brush);
+            }
+
+            public static Brush StringToBrush(string value)
+            {
+                try
+                {
+                    return (Brush)BrushConverter.ConvertFromString(value);
+                }
+                catch
+                {
+                    return null;
+                }
+            }
         }
 
         #region Propiedades
