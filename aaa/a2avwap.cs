@@ -121,6 +121,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                     RemoveDrawObject("a2avwap_Anchor1");
                     RemoveDrawObject("a2avwap_Anchor2");
                 }
+                anchor1Line = null;
+                anchor2Line = null;
                 return;
             }
 
@@ -130,9 +132,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                 if (anchor1Line != null && Anchored1)
                 {
                     DateTime lineTime = anchor1Line.StartAnchor.Time;
-                    if (lineTime != anchor1DateTime)
+                    DateTime snappedTime;
+                    if (TrySnapAnchor(lineTime, out snappedTime) && snappedTime != anchor1DateTime)
                     {
-                        anchor1DateTime = lineTime;
+                        anchor1DateTime = snappedTime;
                         Anchor1Date     = anchor1DateTime.Date;
                         Anchor1Time     = anchor1DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
                         ResetAnchor1();
@@ -142,9 +145,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                 if (anchor2Line != null && Anchored2)
                 {
                     DateTime lineTime = anchor2Line.StartAnchor.Time;
-                    if (lineTime != anchor2DateTime)
+                    DateTime snappedTime;
+                    if (TrySnapAnchor(lineTime, out snappedTime) && snappedTime != anchor2DateTime)
                     {
-                        anchor2DateTime = lineTime;
+                        anchor2DateTime = snappedTime;
                         Anchor2Date     = anchor2DateTime.Date;
                         Anchor2Time     = anchor2DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
                         ResetAnchor2();
@@ -154,16 +158,22 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             // 2) Detectar cambios en las propiedades (fecha/hora) desde el panel
             DateTime propAnchor1 = BuildAnchorDateTime(Anchor1Date, Anchor1Time);
-            if (propAnchor1 != anchor1DateTime)
+            DateTime snappedAnchor1;
+            if (TrySnapAnchor(propAnchor1, out snappedAnchor1) && snappedAnchor1 != anchor1DateTime)
             {
-                anchor1DateTime = propAnchor1;
+                anchor1DateTime = snappedAnchor1;
+                Anchor1Date     = anchor1DateTime.Date;
+                Anchor1Time     = anchor1DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
                 ResetAnchor1();
             }
 
             DateTime propAnchor2 = BuildAnchorDateTime(Anchor2Date, Anchor2Time);
-            if (propAnchor2 != anchor2DateTime)
+            DateTime snappedAnchor2;
+            if (TrySnapAnchor(propAnchor2, out snappedAnchor2) && snappedAnchor2 != anchor2DateTime)
             {
-                anchor2DateTime = propAnchor2;
+                anchor2DateTime = snappedAnchor2;
+                Anchor2Date     = anchor2DateTime.Date;
+                Anchor2Time     = anchor2DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
                 ResetAnchor2();
             }
 
@@ -351,6 +361,36 @@ namespace NinjaTrader.NinjaScript.Indicators
             anchor2SumV   = 0.0;
             anchor2SumP2V = 0.0;
             anchor2Active = false;
+        }
+
+        private bool TrySnapAnchor(DateTime requested, out DateTime snapped)
+        {
+            snapped = requested;
+
+            if (Bars == null || CurrentBar < 0)
+                return false;
+
+            int closestBarsAgo = -1;
+            double minDiffMs   = double.MaxValue;
+
+            for (int barsAgo = 0; barsAgo <= CurrentBar; barsAgo++)
+            {
+                DateTime candidate = Time[barsAgo];
+                double diffMs = Math.Abs((candidate - requested).TotalMilliseconds);
+                if (diffMs < minDiffMs)
+                {
+                    minDiffMs      = diffMs;
+                    closestBarsAgo = barsAgo;
+                }
+            }
+
+            if (closestBarsAgo >= 0)
+            {
+                snapped = Time[closestBarsAgo];
+                return true;
+            }
+
+            return false;
         }
 
         private void SetAllNan()
