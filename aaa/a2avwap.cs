@@ -42,6 +42,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         private VerticalLine anchor2Line;
         private bool         anchor1LineDirty;
         private bool         anchor2LineDirty;
+        private bool         needsFullRecalc;
 
         protected override void OnStateChange()
         {
@@ -106,6 +107,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 anchor1LineDirty = true;
                 anchor2LineDirty = true;
+                needsFullRecalc  = true;
             }
             else if (State == State.Terminated)
             {
@@ -145,7 +147,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                         anchor1DateTime = snappedTime;
                         Anchor1Date     = anchor1DateTime.Date;
                         Anchor1Time     = anchor1DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
-                        ResetAnchor1();
+                        needsFullRecalc = true;
                         anchor1LineDirty = true;
                     }
                 }
@@ -159,7 +161,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                         anchor2DateTime = snappedTime;
                         Anchor2Date     = anchor2DateTime.Date;
                         Anchor2Time     = anchor2DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
-                        ResetAnchor2();
+                        needsFullRecalc = true;
                         anchor2LineDirty = true;
                     }
                 }
@@ -172,7 +174,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (newAnchor1 != anchor1DateTime)
             {
                 anchor1DateTime = newAnchor1;
-                ResetAnchor1();
+                needsFullRecalc = true;
                 anchor1LineDirty = true;
             }
 
@@ -182,7 +184,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (newAnchor2 != anchor2DateTime)
             {
                 anchor2DateTime = newAnchor2;
-                ResetAnchor2();
+                needsFullRecalc = true;
                 anchor2LineDirty = true;
             }
 
@@ -216,6 +218,13 @@ namespace NinjaTrader.NinjaScript.Indicators
                     anchor2Line = null;
                     anchor2LineDirty = true;
                 }
+            }
+
+            if (needsFullRecalc)
+            {
+                RecalculateAll();
+                needsFullRecalc = false;
+                return;
             }
 
             // 4) Cálculo del precio medio (típico) y volumen de la barra
@@ -384,6 +393,163 @@ namespace NinjaTrader.NinjaScript.Indicators
             anchor2SumV   = 0.0;
             anchor2SumP2V = 0.0;
             anchor2Active = false;
+        }
+
+        private void RecalculateAll()
+        {
+            if (CurrentBar < 0)
+                return;
+
+            anchor1Active = false;
+            anchor2Active = false;
+            anchor1SumPV  = 0.0;
+            anchor1SumV   = 0.0;
+            anchor1SumP2V = 0.0;
+            anchor2SumPV  = 0.0;
+            anchor2SumV   = 0.0;
+            anchor2SumP2V = 0.0;
+
+            double sum1PV = 0.0, sum1V = 0.0, sum1P2V = 0.0;
+            double sum2PV = 0.0, sum2V = 0.0, sum2P2V = 0.0;
+            bool   active1 = false, active2 = false;
+
+            for (int barsAgo = CurrentBar; barsAgo >= 0; barsAgo--)
+            {
+                double price  = (Open[barsAgo] + High[barsAgo] + Low[barsAgo] + Close[barsAgo]) / 4.0;
+                double volume = Volume[barsAgo];
+
+                ProcessModuleHistorical(
+                    ref active1,
+                    ref sum1PV,
+                    ref sum1V,
+                    ref sum1P2V,
+                    anchor1DateTime,
+                    Anchored1,
+                    ShowAnchor1Bands1,
+                    ShowAnchor1Bands2,
+                    0, 1, 2, 3, 4,
+                    price, volume,
+                    barsAgo);
+
+                ProcessModuleHistorical(
+                    ref active2,
+                    ref sum2PV,
+                    ref sum2V,
+                    ref sum2P2V,
+                    anchor2DateTime,
+                    Anchored2,
+                    ShowAnchor2Bands1,
+                    ShowAnchor2Bands2,
+                    5, 6, 7, 8, 9,
+                    price, volume,
+                    barsAgo);
+            }
+
+            anchor1Active = active1;
+            anchor1SumPV  = sum1PV;
+            anchor1SumV   = sum1V;
+            anchor1SumP2V = sum1P2V;
+
+            anchor2Active = active2;
+            anchor2SumPV  = sum2PV;
+            anchor2SumV   = sum2V;
+            anchor2SumP2V = sum2P2V;
+        }
+
+        private void ProcessModuleHistorical(
+            ref bool moduleActive,
+            ref double sumPV,
+            ref double sumV,
+            ref double sumP2V,
+            DateTime anchorDateTime,
+            bool isEnabled,
+            bool showBands1,
+            bool showBands2,
+            int vwapPlot,
+            int plus1Plot,
+            int minus1Plot,
+            int plus2Plot,
+            int minus2Plot,
+            double price,
+            double volume,
+            int barsAgo)
+        {
+            if (!isEnabled)
+            {
+                Values[vwapPlot][barsAgo]  = double.NaN;
+                Values[plus1Plot][barsAgo] = double.NaN;
+                Values[minus1Plot][barsAgo]= double.NaN;
+                Values[plus2Plot][barsAgo] = double.NaN;
+                Values[minus2Plot][barsAgo]= double.NaN;
+                return;
+            }
+
+            if (!moduleActive && Time[barsAgo] >= anchorDateTime)
+            {
+                sumPV       = 0.0;
+                sumV        = 0.0;
+                sumP2V      = 0.0;
+                moduleActive = true;
+            }
+
+            if (!moduleActive)
+            {
+                Values[vwapPlot][barsAgo]  = double.NaN;
+                Values[plus1Plot][barsAgo] = double.NaN;
+                Values[minus1Plot][barsAgo]= double.NaN;
+                Values[plus2Plot][barsAgo] = double.NaN;
+                Values[minus2Plot][barsAgo]= double.NaN;
+                return;
+            }
+
+            if (volume > 0)
+            {
+                sumPV  += price * volume;
+                sumV   += volume;
+                sumP2V += price * price * volume;
+            }
+
+            double vwap;
+            double stdDev;
+
+            if (sumV == 0)
+            {
+                vwap   = price;
+                stdDev = 0.0;
+            }
+            else
+            {
+                vwap = sumPV / sumV;
+                double meanP2 = sumP2V / sumV;
+                double variance = meanP2 - vwap * vwap;
+                if (variance < 0)
+                    variance = 0;
+                stdDev = Math.Sqrt(variance);
+            }
+
+            Values[vwapPlot][barsAgo] = vwap;
+
+            if (showBands1)
+            {
+                Values[plus1Plot][barsAgo]  = vwap + stdDev;
+                Values[minus1Plot][barsAgo] = vwap - stdDev;
+            }
+            else
+            {
+                Values[plus1Plot][barsAgo]  = double.NaN;
+                Values[minus1Plot][barsAgo] = double.NaN;
+            }
+
+            if (showBands2)
+            {
+                Values[plus2Plot][barsAgo]  = vwap + 2.0 * stdDev;
+                Values[minus2Plot][barsAgo] = vwap - 2.0 * stdDev;
+            }
+            else
+            {
+                Values[plus2Plot][barsAgo]  = double.NaN;
+                Values[minus2Plot][barsAgo] = double.NaN;
+            }
         }
 
         private bool TrySnapAnchor(DateTime requested, out DateTime snapped)
