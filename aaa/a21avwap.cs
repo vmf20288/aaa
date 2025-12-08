@@ -32,8 +32,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         private double      weeklySumPV;
         private double      weeklySumP2V;
         private double      weeklySumV;
-        private int         currentWeek;
-        private int         currentWeekYear;
+        private DateTime    currentWeekStart;
         private static readonly BrushConverter brushConverter = new BrushConverter();
 
         protected override void OnStateChange()
@@ -124,8 +123,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 anchor2 = InitializeAnchor(Anchor2Date, Anchor2Time);
                 sessionSumPV   = sessionSumP2V = sessionSumV = 0;
                 weeklySumPV    = weeklySumP2V = weeklySumV = 0;
-                currentWeek    = -1;
-                currentWeekYear = -1;
+                currentWeekStart = DateTime.MinValue;
                 UpdatePlotBrushes();
             }
         }
@@ -325,16 +323,21 @@ namespace NinjaTrader.NinjaScript.Indicators
                 return;
             }
 
-            int weekOfYear = CultureInfo.InvariantCulture.Calendar.GetWeekOfYear(Time[0].Date, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
-            int year       = Time[0].Date.Year;
+            DateTime barTime   = Time[0];
+            DateTime barDate   = barTime.Date;
+            int      daysSinceSunday = (int)barDate.DayOfWeek;
+            DateTime sundayDate      = barDate.AddDays(-daysSinceSunday);
+            DateTime weekStart       = sundayDate.AddHours(18);
 
-            if (weekOfYear != currentWeek || year != currentWeekYear)
+            if (barTime < weekStart)
+                weekStart = sundayDate.AddDays(-7).AddHours(18);
+
+            if (weekStart != currentWeekStart)
             {
-                weeklySumPV    = 0;
-                weeklySumP2V   = 0;
-                weeklySumV     = 0;
-                currentWeek    = weekOfYear;
-                currentWeekYear = year;
+                weeklySumPV     = 0;
+                weeklySumP2V    = 0;
+                weeklySumV      = 0;
+                currentWeekStart = weekStart;
             }
 
             double priceBar = (Open[0] + High[0] + Low[0] + Close[0]) / 4.0;
