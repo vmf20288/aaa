@@ -26,6 +26,14 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private AnchorState anchor1;
         private AnchorState anchor2;
+        private double      sessionSumPV;
+        private double      sessionSumP2V;
+        private double      sessionSumV;
+        private double      weeklySumPV;
+        private double      weeklySumP2V;
+        private double      weeklySumV;
+        private int         currentWeek;
+        private int         currentWeekYear;
         private static readonly BrushConverter brushConverter = new BrushConverter();
 
         protected override void OnStateChange()
@@ -42,6 +50,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 ShowAnchored              = true;
                 Anchored1                 = true;
                 Anchored2                 = false;
+                VwapSessionEnabled        = false;
+                VwapWeeklyEnabled         = true;
 
                 Anchor1Date               = DateTime.Today;
                 Anchor1Time               = "00:00";
@@ -53,6 +63,12 @@ namespace NinjaTrader.NinjaScript.Indicators
                 ShowAnchor2Band1          = false;
                 ShowAnchor2Band2          = false;
 
+                ShowSessionBand1          = true;
+                ShowSessionBand2          = false;
+
+                ShowWeeklyBand1           = true;
+                ShowWeeklyBand2           = false;
+
                 Anchor1VwapColor          = Brushes.Blue;
                 Anchor1Band1Color         = Brushes.Green;
                 Anchor1Band2Color         = Brushes.Green;
@@ -60,6 +76,14 @@ namespace NinjaTrader.NinjaScript.Indicators
                 Anchor2VwapColor          = Brushes.Blue;
                 Anchor2Band1Color         = Brushes.Green;
                 Anchor2Band2Color         = Brushes.Green;
+
+                SessionVwapColor          = Brushes.Blue;
+                SessionBand1Color         = Brushes.Green;
+                SessionBand2Color         = Brushes.Green;
+
+                WeeklyVwapColor           = Brushes.Blue;
+                WeeklyBand1Color          = Brushes.Green;
+                WeeklyBand2Color          = Brushes.Green;
 
                 AddPlot(Anchor1VwapColor,  "AnchoredVWAP1");
                 AddPlot(Anchor1Band1Color, "Anchored1+1");
@@ -72,6 +96,18 @@ namespace NinjaTrader.NinjaScript.Indicators
                 AddPlot(Anchor2Band1Color, "Anchored2-1");
                 AddPlot(Anchor2Band2Color, "Anchored2+2");
                 AddPlot(Anchor2Band2Color, "Anchored2-2");
+
+                AddPlot(SessionVwapColor,  "SessionVWAP");
+                AddPlot(SessionBand1Color, "Session+1");
+                AddPlot(SessionBand1Color, "Session-1");
+                AddPlot(SessionBand2Color, "Session+2");
+                AddPlot(SessionBand2Color, "Session-2");
+
+                AddPlot(WeeklyVwapColor,   "WeeklyVWAP");
+                AddPlot(WeeklyBand1Color,  "Weekly+1");
+                AddPlot(WeeklyBand1Color,  "Weekly-1");
+                AddPlot(WeeklyBand2Color,  "Weekly+2");
+                AddPlot(WeeklyBand2Color,  "Weekly-2");
             }
             else if (State == State.DataLoaded)
             {
@@ -86,6 +122,10 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 anchor1 = InitializeAnchor(Anchor1Date, Anchor1Time);
                 anchor2 = InitializeAnchor(Anchor2Date, Anchor2Time);
+                sessionSumPV   = sessionSumP2V = sessionSumV = 0;
+                weeklySumPV    = weeklySumP2V = weeklySumV = 0;
+                currentWeek    = -1;
+                currentWeekYear = -1;
                 UpdatePlotBrushes();
             }
         }
@@ -94,15 +134,20 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             if (!ShowAnchored)
             {
-                SetAllNan();
-                return;
+                SetAnchorPlotsToNan(0);
+                SetAnchorPlotsToNan(5);
+            }
+            else
+            {
+                // Resolve anchor DateTime from current properties in case user modified them
+                UpdateAnchorDateTimes();
+
+                ProcessAnchor(ref anchor1, Anchored1, ShowAnchor1Band1, ShowAnchor1Band2, Anchor1VwapColor, Anchor1Band1Color, Anchor1Band2Color, 0);
+                ProcessAnchor(ref anchor2, Anchored2, ShowAnchor2Band1, ShowAnchor2Band2, Anchor2VwapColor, Anchor2Band1Color, Anchor2Band2Color, 5);
             }
 
-            // Resolve anchor DateTime from current properties in case user modified them
-            UpdateAnchorDateTimes();
-
-            ProcessAnchor(ref anchor1, Anchored1, ShowAnchor1Band1, ShowAnchor1Band2, Anchor1VwapColor, Anchor1Band1Color, Anchor1Band2Color, 0);
-            ProcessAnchor(ref anchor2, Anchored2, ShowAnchor2Band1, ShowAnchor2Band2, Anchor2VwapColor, Anchor2Band1Color, Anchor2Band2Color, 5);
+            ProcessSessionVwap();
+            ProcessWeeklyVwap();
         }
 
         private AnchorState InitializeAnchor(DateTime anchorDate, string anchorTime)
@@ -221,7 +266,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private void SetAllNan()
         {
-            for (int i = 0; i < 10; i++)
+            for (int i = 0; i < 20; i++)
                 Values[i][0] = double.NaN;
         }
 
@@ -231,10 +276,99 @@ namespace NinjaTrader.NinjaScript.Indicators
                 Values[i][0] = double.NaN;
         }
 
+        private void ProcessSessionVwap()
+        {
+            if (!VwapSessionEnabled)
+            {
+                SetAnchorPlotsToNan(10);
+                return;
+            }
+
+            if (Bars.IsFirstBarOfSession)
+            {
+                sessionSumPV  = 0;
+                sessionSumP2V = 0;
+                sessionSumV   = 0;
+            }
+
+            double priceBar = (Open[0] + High[0] + Low[0] + Close[0]) / 4.0;
+            double volBar   = Volume[0];
+
+            sessionSumPV  += priceBar * volBar;
+            sessionSumP2V += priceBar * priceBar * volBar;
+            sessionSumV   += volBar;
+
+            if (Math.Abs(sessionSumV) <= double.Epsilon)
+            {
+                SetAnchorPlotsToNan(10);
+                return;
+            }
+
+            double vwap     = sessionSumPV / sessionSumV;
+            double variance = (sessionSumP2V / sessionSumV) - vwap * vwap;
+            double stdDev   = variance > 0 ? Math.Sqrt(variance) : 0;
+
+            UpdatePlotColors(10, SessionVwapColor, SessionBand1Color, SessionBand2Color);
+
+            Values[10][0] = vwap;
+            Values[11][0] = ShowSessionBand1 ? vwap + stdDev : double.NaN;
+            Values[12][0] = ShowSessionBand1 ? vwap - stdDev : double.NaN;
+            Values[13][0] = ShowSessionBand2 ? vwap + 2 * stdDev : double.NaN;
+            Values[14][0] = ShowSessionBand2 ? vwap - 2 * stdDev : double.NaN;
+        }
+
+        private void ProcessWeeklyVwap()
+        {
+            if (!VwapWeeklyEnabled)
+            {
+                SetAnchorPlotsToNan(15);
+                return;
+            }
+
+            int weekOfYear = CultureInfo.InvariantCulture.Calendar.GetWeekOfYear(Time[0].Date, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
+            int year       = Time[0].Date.Year;
+
+            if (weekOfYear != currentWeek || year != currentWeekYear)
+            {
+                weeklySumPV    = 0;
+                weeklySumP2V   = 0;
+                weeklySumV     = 0;
+                currentWeek    = weekOfYear;
+                currentWeekYear = year;
+            }
+
+            double priceBar = (Open[0] + High[0] + Low[0] + Close[0]) / 4.0;
+            double volBar   = Volume[0];
+
+            weeklySumPV  += priceBar * volBar;
+            weeklySumP2V += priceBar * priceBar * volBar;
+            weeklySumV   += volBar;
+
+            if (Math.Abs(weeklySumV) <= double.Epsilon)
+            {
+                SetAnchorPlotsToNan(15);
+                return;
+            }
+
+            double vwap     = weeklySumPV / weeklySumV;
+            double variance = (weeklySumP2V / weeklySumV) - vwap * vwap;
+            double stdDev   = variance > 0 ? Math.Sqrt(variance) : 0;
+
+            UpdatePlotColors(15, WeeklyVwapColor, WeeklyBand1Color, WeeklyBand2Color);
+
+            Values[15][0] = vwap;
+            Values[16][0] = ShowWeeklyBand1 ? vwap + stdDev : double.NaN;
+            Values[17][0] = ShowWeeklyBand1 ? vwap - stdDev : double.NaN;
+            Values[18][0] = ShowWeeklyBand2 ? vwap + 2 * stdDev : double.NaN;
+            Values[19][0] = ShowWeeklyBand2 ? vwap - 2 * stdDev : double.NaN;
+        }
+
         private void UpdatePlotBrushes()
         {
             UpdatePlotColors(0, Anchor1VwapColor, Anchor1Band1Color, Anchor1Band2Color);
             UpdatePlotColors(5, Anchor2VwapColor, Anchor2Band1Color, Anchor2Band2Color);
+            UpdatePlotColors(10, SessionVwapColor, SessionBand1Color, SessionBand2Color);
+            UpdatePlotColors(15, WeeklyVwapColor, WeeklyBand1Color, WeeklyBand2Color);
         }
 
         private void UpdatePlotColors(int offset, Brush vwapBrush, Brush band1Brush, Brush band2Brush)
@@ -259,6 +393,14 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Category("Global")]
         [Display(Name = "anchored 2", Order = 3, GroupName = "Global")]
         public bool Anchored2 { get; set; }
+
+        [Category("Global")]
+        [Display(Name = "vwap session", Order = 4, GroupName = "Global")]
+        public bool VwapSessionEnabled { get; set; }
+
+        [Category("Global")]
+        [Display(Name = "vwap weekly", Order = 5, GroupName = "Global")]
+        public bool VwapWeeklyEnabled { get; set; }
 
         [Category("Anchored 1")]
         [Display(Name = "fecha", Order = 1, GroupName = "Anchored 1")]
@@ -362,6 +504,94 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             get { return BrushToString(Anchor2Band2Color); }
             set { Anchor2Band2Color = StringToBrush(value); }
+        }
+
+        [Category("vwap session")]
+        [Display(Name = "show band +-1", Order = 1, GroupName = "vwap session")]
+        public bool ShowSessionBand1 { get; set; }
+
+        [Category("vwap session")]
+        [Display(Name = "show band +-2", Order = 2, GroupName = "vwap session")]
+        public bool ShowSessionBand2 { get; set; }
+
+        [XmlIgnore]
+        [Category("vwap session")]
+        [Display(Name = "vwap color", Order = 3, GroupName = "vwap session")]
+        public Brush SessionVwapColor { get; set; }
+
+        [Browsable(false)]
+        public string SessionVwapColorSerializable
+        {
+            get { return BrushToString(SessionVwapColor); }
+            set { SessionVwapColor = StringToBrush(value); }
+        }
+
+        [XmlIgnore]
+        [Category("vwap session")]
+        [Display(Name = "vwap +- 1 color", Order = 4, GroupName = "vwap session")]
+        public Brush SessionBand1Color { get; set; }
+
+        [Browsable(false)]
+        public string SessionBand1ColorSerializable
+        {
+            get { return BrushToString(SessionBand1Color); }
+            set { SessionBand1Color = StringToBrush(value); }
+        }
+
+        [XmlIgnore]
+        [Category("vwap session")]
+        [Display(Name = "vwap +-2 color", Order = 5, GroupName = "vwap session")]
+        public Brush SessionBand2Color { get; set; }
+
+        [Browsable(false)]
+        public string SessionBand2ColorSerializable
+        {
+            get { return BrushToString(SessionBand2Color); }
+            set { SessionBand2Color = StringToBrush(value); }
+        }
+
+        [Category("vwap weekly")]
+        [Display(Name = "show band +-1", Order = 1, GroupName = "vwap weekly")]
+        public bool ShowWeeklyBand1 { get; set; }
+
+        [Category("vwap weekly")]
+        [Display(Name = "show band +-2", Order = 2, GroupName = "vwap weekly")]
+        public bool ShowWeeklyBand2 { get; set; }
+
+        [XmlIgnore]
+        [Category("vwap weekly")]
+        [Display(Name = "vwap color", Order = 3, GroupName = "vwap weekly")]
+        public Brush WeeklyVwapColor { get; set; }
+
+        [Browsable(false)]
+        public string WeeklyVwapColorSerializable
+        {
+            get { return BrushToString(WeeklyVwapColor); }
+            set { WeeklyVwapColor = StringToBrush(value); }
+        }
+
+        [XmlIgnore]
+        [Category("vwap weekly")]
+        [Display(Name = "vwap +- 1 color", Order = 4, GroupName = "vwap weekly")]
+        public Brush WeeklyBand1Color { get; set; }
+
+        [Browsable(false)]
+        public string WeeklyBand1ColorSerializable
+        {
+            get { return BrushToString(WeeklyBand1Color); }
+            set { WeeklyBand1Color = StringToBrush(value); }
+        }
+
+        [XmlIgnore]
+        [Category("vwap weekly")]
+        [Display(Name = "vwap +-2 color", Order = 5, GroupName = "vwap weekly")]
+        public Brush WeeklyBand2Color { get; set; }
+
+        [Browsable(false)]
+        public string WeeklyBand2ColorSerializable
+        {
+            get { return BrushToString(WeeklyBand2Color); }
+            set { WeeklyBand2Color = StringToBrush(value); }
         }
 
         private static string BrushToString(Brush brush)
