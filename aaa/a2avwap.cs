@@ -40,6 +40,8 @@ namespace NinjaTrader.NinjaScript.Indicators
         // Líneas verticales (para drag con el ratón)
         private VerticalLine anchor1Line;
         private VerticalLine anchor2Line;
+        private bool         anchor1LineDirty;
+        private bool         anchor2LineDirty;
 
         protected override void OnStateChange()
         {
@@ -101,6 +103,9 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 ResetAnchor1();
                 ResetAnchor2();
+
+                anchor1LineDirty = true;
+                anchor2LineDirty = true;
             }
             else if (State == State.Terminated)
             {
@@ -123,6 +128,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 }
                 anchor1Line = null;
                 anchor2Line = null;
+                anchor1LineDirty = true;
+                anchor2LineDirty = true;
                 return;
             }
 
@@ -139,6 +146,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                         Anchor1Date     = anchor1DateTime.Date;
                         Anchor1Time     = anchor1DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
                         ResetAnchor1();
+                        anchor1LineDirty = true;
                     }
                 }
 
@@ -152,6 +160,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                         Anchor2Date     = anchor2DateTime.Date;
                         Anchor2Time     = anchor2DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
                         ResetAnchor2();
+                        anchor2LineDirty = true;
                     }
                 }
             }
@@ -164,6 +173,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 anchor1DateTime = newAnchor1;
                 ResetAnchor1();
+                anchor1LineDirty = true;
             }
 
             DateTime propAnchor2 = BuildAnchorDateTime(Anchor2Date, Anchor2Time, anchor2DateTime, out _);
@@ -173,6 +183,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 anchor2DateTime = newAnchor2;
                 ResetAnchor2();
+                anchor2LineDirty = true;
             }
 
             // 3) Dibujar / borrar las líneas verticales de anclaje
@@ -180,26 +191,30 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 if (Anchored1)
                 {
-                    anchor1Line = Draw.VerticalLine(this, "a2avwap_Anchor1", anchor1DateTime, Anchor1VwapBrush);
-                    if (anchor1Line != null)
-                        anchor1Line.IsLocked = false; // para poder arrastrar
+                    if (anchor1Line == null)
+                        anchor1LineDirty = true;
+
+                    EnsureAnchorLine(ref anchor1Line, "a2avwap_Anchor1", ref anchor1LineDirty, anchor1DateTime, Anchor1VwapBrush);
                 }
                 else
                 {
                     RemoveDrawObject("a2avwap_Anchor1");
                     anchor1Line = null;
+                    anchor1LineDirty = true;
                 }
 
                 if (Anchored2)
                 {
-                    anchor2Line = Draw.VerticalLine(this, "a2avwap_Anchor2", anchor2DateTime, Anchor2VwapBrush);
-                    if (anchor2Line != null)
-                        anchor2Line.IsLocked = false;
+                    if (anchor2Line == null)
+                        anchor2LineDirty = true;
+
+                    EnsureAnchorLine(ref anchor2Line, "a2avwap_Anchor2", ref anchor2LineDirty, anchor2DateTime, Anchor2VwapBrush);
                 }
                 else
                 {
                     RemoveDrawObject("a2avwap_Anchor2");
                     anchor2Line = null;
+                    anchor2LineDirty = true;
                 }
             }
 
@@ -394,6 +409,31 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
 
             return false;
+        }
+
+        private void EnsureAnchorLine(ref VerticalLine line, string tag, ref bool dirty, DateTime anchorTime, Brush brush)
+        {
+            if (!dirty && line != null)
+            {
+                line.Brush = brush;
+                line.IsLocked = false;
+                return;
+            }
+
+            if (line == null)
+            {
+                line = Draw.VerticalLine(this, tag, anchorTime, brush);
+            }
+            else
+            {
+                line.StartAnchor.Time = anchorTime;
+                line.Brush = brush;
+            }
+
+            if (line != null)
+                line.IsLocked = false;
+
+            dirty = false;
         }
 
         private void SetAllNan()
