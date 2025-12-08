@@ -415,9 +415,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             if (!dirty && line != null)
             {
-                if (line.Stroke == null)
-                    line.Stroke = new Stroke(brush);
-                else
+                if (line.Stroke != null)
                     line.Stroke.Brush = brush;
                 line.IsLocked = false;
                 return;
@@ -430,9 +428,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             else
             {
                 line.StartAnchor.Time = anchorTime;
-                if (line.Stroke == null)
-                    line.Stroke = new Stroke(brush);
-                else
+                if (line.Stroke != null)
                     line.Stroke.Brush = brush;
             }
 
