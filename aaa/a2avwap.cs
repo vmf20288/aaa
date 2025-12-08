@@ -40,6 +40,9 @@ namespace NinjaTrader.NinjaScript.Indicators
         // Líneas verticales (para drag con el ratón)
         private VerticalLine anchor1Line;
         private VerticalLine anchor2Line;
+        private bool         anchor1LineDirty;
+        private bool         anchor2LineDirty;
+        private bool         needsFullRecalc;
 
         protected override void OnStateChange()
         {
@@ -93,14 +96,18 @@ namespace NinjaTrader.NinjaScript.Indicators
             else if (State == State.DataLoaded)
             {
                 // Construir DateTime inicial desde propiedades
-                anchor1DateTime = BuildAnchorDateTime(Anchor1Date, Anchor1Time);
-                anchor2DateTime = BuildAnchorDateTime(Anchor2Date, Anchor2Time);
+                anchor1DateTime = BuildAnchorDateTime(Anchor1Date, Anchor1Time, anchor1DateTime == default(DateTime) ? Anchor1Date.Date : anchor1DateTime, out _);
+                anchor2DateTime = BuildAnchorDateTime(Anchor2Date, Anchor2Time, anchor2DateTime == default(DateTime) ? Anchor2Date.Date : anchor2DateTime, out _);
 
                 // Asegurar que los plots usan los colores de las propiedades
                 UpdatePlotBrushes();
 
                 ResetAnchor1();
                 ResetAnchor2();
+
+                anchor1LineDirty = true;
+                anchor2LineDirty = true;
+                needsFullRecalc  = true;
             }
             else if (State == State.Terminated)
             {
@@ -121,6 +128,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                     RemoveDrawObject("a2avwap_Anchor1");
                     RemoveDrawObject("a2avwap_Anchor2");
                 }
+                anchor1Line = null;
+                anchor2Line = null;
+                anchor1LineDirty = true;
+                anchor2LineDirty = true;
                 return;
             }
 
@@ -130,41 +141,51 @@ namespace NinjaTrader.NinjaScript.Indicators
                 if (anchor1Line != null && Anchored1)
                 {
                     DateTime lineTime = anchor1Line.StartAnchor.Time;
-                    if (lineTime != anchor1DateTime)
+                    DateTime snappedTime;
+                    if (TrySnapAnchor(lineTime, out snappedTime) && snappedTime != anchor1DateTime)
                     {
-                        anchor1DateTime = lineTime;
+                        anchor1DateTime = snappedTime;
                         Anchor1Date     = anchor1DateTime.Date;
                         Anchor1Time     = anchor1DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
-                        ResetAnchor1();
+                        needsFullRecalc = true;
+                        anchor1LineDirty = true;
                     }
                 }
 
                 if (anchor2Line != null && Anchored2)
                 {
                     DateTime lineTime = anchor2Line.StartAnchor.Time;
-                    if (lineTime != anchor2DateTime)
+                    DateTime snappedTime;
+                    if (TrySnapAnchor(lineTime, out snappedTime) && snappedTime != anchor2DateTime)
                     {
-                        anchor2DateTime = lineTime;
+                        anchor2DateTime = snappedTime;
                         Anchor2Date     = anchor2DateTime.Date;
                         Anchor2Time     = anchor2DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
-                        ResetAnchor2();
+                        needsFullRecalc = true;
+                        anchor2LineDirty = true;
                     }
                 }
             }
 
             // 2) Detectar cambios en las propiedades (fecha/hora) desde el panel
-            DateTime propAnchor1 = BuildAnchorDateTime(Anchor1Date, Anchor1Time);
-            if (propAnchor1 != anchor1DateTime)
+            DateTime propAnchor1 = BuildAnchorDateTime(Anchor1Date, Anchor1Time, anchor1DateTime, out _);
+            DateTime snappedAnchor1;
+            DateTime newAnchor1 = TrySnapAnchor(propAnchor1, out snappedAnchor1) ? snappedAnchor1 : propAnchor1;
+            if (newAnchor1 != anchor1DateTime)
             {
-                anchor1DateTime = propAnchor1;
-                ResetAnchor1();
+                anchor1DateTime = newAnchor1;
+                needsFullRecalc = true;
+                anchor1LineDirty = true;
             }
 
-            DateTime propAnchor2 = BuildAnchorDateTime(Anchor2Date, Anchor2Time);
-            if (propAnchor2 != anchor2DateTime)
+            DateTime propAnchor2 = BuildAnchorDateTime(Anchor2Date, Anchor2Time, anchor2DateTime, out _);
+            DateTime snappedAnchor2;
+            DateTime newAnchor2 = TrySnapAnchor(propAnchor2, out snappedAnchor2) ? snappedAnchor2 : propAnchor2;
+            if (newAnchor2 != anchor2DateTime)
             {
-                anchor2DateTime = propAnchor2;
-                ResetAnchor2();
+                anchor2DateTime = newAnchor2;
+                needsFullRecalc = true;
+                anchor2LineDirty = true;
             }
 
             // 3) Dibujar / borrar las líneas verticales de anclaje
@@ -172,27 +193,38 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 if (Anchored1)
                 {
-                    anchor1Line = Draw.VerticalLine(this, "a2avwap_Anchor1", anchor1DateTime, Anchor1VwapBrush);
-                    if (anchor1Line != null)
-                        anchor1Line.IsLocked = false; // para poder arrastrar
+                    if (anchor1Line == null)
+                        anchor1LineDirty = true;
+
+                    EnsureAnchorLine(ref anchor1Line, "a2avwap_Anchor1", ref anchor1LineDirty, anchor1DateTime, Anchor1VwapBrush);
                 }
                 else
                 {
                     RemoveDrawObject("a2avwap_Anchor1");
                     anchor1Line = null;
+                    anchor1LineDirty = true;
                 }
 
                 if (Anchored2)
                 {
-                    anchor2Line = Draw.VerticalLine(this, "a2avwap_Anchor2", anchor2DateTime, Anchor2VwapBrush);
-                    if (anchor2Line != null)
-                        anchor2Line.IsLocked = false;
+                    if (anchor2Line == null)
+                        anchor2LineDirty = true;
+
+                    EnsureAnchorLine(ref anchor2Line, "a2avwap_Anchor2", ref anchor2LineDirty, anchor2DateTime, Anchor2VwapBrush);
                 }
                 else
                 {
                     RemoveDrawObject("a2avwap_Anchor2");
                     anchor2Line = null;
+                    anchor2LineDirty = true;
                 }
+            }
+
+            if (needsFullRecalc)
+            {
+                RecalculateAll();
+                needsFullRecalc = false;
+                return;
             }
 
             // 4) Cálculo del precio medio (típico) y volumen de la barra
@@ -328,13 +360,23 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
         }
 
-        private DateTime BuildAnchorDateTime(DateTime anchorDate, string anchorTime)
+        private DateTime BuildAnchorDateTime(DateTime anchorDate, string anchorTime, DateTime previousAnchor, out bool parsed)
         {
             TimeSpan ts;
-            if (!TimeSpan.TryParseExact(anchorTime ?? "00:00", "hh\\:mm", CultureInfo.InvariantCulture, out ts))
-                ts = TimeSpan.Zero;
+            parsed = TryParseAnchorTime(anchorTime, out ts);
+            TimeSpan timeComponent = parsed ? ts : previousAnchor.TimeOfDay;
+            return anchorDate.Date + timeComponent;
+        }
 
-            return anchorDate.Date + ts;
+        private bool TryParseAnchorTime(string anchorTime, out TimeSpan result)
+        {
+            string timeText = (anchorTime ?? string.Empty).Trim();
+            string[] formats = new[] { "H\\:mm", "HH\\:mm", "H\\:m", "HH\\:m" };
+
+            if (TimeSpan.TryParseExact(timeText, formats, CultureInfo.InvariantCulture, out result))
+                return true;
+
+            return TimeSpan.TryParse(timeText, CultureInfo.InvariantCulture, out result);
         }
 
         private void ResetAnchor1()
@@ -351,6 +393,215 @@ namespace NinjaTrader.NinjaScript.Indicators
             anchor2SumV   = 0.0;
             anchor2SumP2V = 0.0;
             anchor2Active = false;
+        }
+
+        private void RecalculateAll()
+        {
+            if (CurrentBar < 0)
+                return;
+
+            anchor1Active = false;
+            anchor2Active = false;
+            anchor1SumPV  = 0.0;
+            anchor1SumV   = 0.0;
+            anchor1SumP2V = 0.0;
+            anchor2SumPV  = 0.0;
+            anchor2SumV   = 0.0;
+            anchor2SumP2V = 0.0;
+
+            double sum1PV = 0.0, sum1V = 0.0, sum1P2V = 0.0;
+            double sum2PV = 0.0, sum2V = 0.0, sum2P2V = 0.0;
+            bool   active1 = false, active2 = false;
+
+            for (int barsAgo = CurrentBar; barsAgo >= 0; barsAgo--)
+            {
+                double price  = (Open[barsAgo] + High[barsAgo] + Low[barsAgo] + Close[barsAgo]) / 4.0;
+                double volume = Volume[barsAgo];
+
+                ProcessModuleHistorical(
+                    ref active1,
+                    ref sum1PV,
+                    ref sum1V,
+                    ref sum1P2V,
+                    anchor1DateTime,
+                    Anchored1,
+                    ShowAnchor1Bands1,
+                    ShowAnchor1Bands2,
+                    0, 1, 2, 3, 4,
+                    price, volume,
+                    barsAgo);
+
+                ProcessModuleHistorical(
+                    ref active2,
+                    ref sum2PV,
+                    ref sum2V,
+                    ref sum2P2V,
+                    anchor2DateTime,
+                    Anchored2,
+                    ShowAnchor2Bands1,
+                    ShowAnchor2Bands2,
+                    5, 6, 7, 8, 9,
+                    price, volume,
+                    barsAgo);
+            }
+
+            anchor1Active = active1;
+            anchor1SumPV  = sum1PV;
+            anchor1SumV   = sum1V;
+            anchor1SumP2V = sum1P2V;
+
+            anchor2Active = active2;
+            anchor2SumPV  = sum2PV;
+            anchor2SumV   = sum2V;
+            anchor2SumP2V = sum2P2V;
+        }
+
+        private void ProcessModuleHistorical(
+            ref bool moduleActive,
+            ref double sumPV,
+            ref double sumV,
+            ref double sumP2V,
+            DateTime anchorDateTime,
+            bool isEnabled,
+            bool showBands1,
+            bool showBands2,
+            int vwapPlot,
+            int plus1Plot,
+            int minus1Plot,
+            int plus2Plot,
+            int minus2Plot,
+            double price,
+            double volume,
+            int barsAgo)
+        {
+            if (!isEnabled)
+            {
+                Values[vwapPlot][barsAgo]  = double.NaN;
+                Values[plus1Plot][barsAgo] = double.NaN;
+                Values[minus1Plot][barsAgo]= double.NaN;
+                Values[plus2Plot][barsAgo] = double.NaN;
+                Values[minus2Plot][barsAgo]= double.NaN;
+                return;
+            }
+
+            if (!moduleActive && Time[barsAgo] >= anchorDateTime)
+            {
+                sumPV       = 0.0;
+                sumV        = 0.0;
+                sumP2V      = 0.0;
+                moduleActive = true;
+            }
+
+            if (!moduleActive)
+            {
+                Values[vwapPlot][barsAgo]  = double.NaN;
+                Values[plus1Plot][barsAgo] = double.NaN;
+                Values[minus1Plot][barsAgo]= double.NaN;
+                Values[plus2Plot][barsAgo] = double.NaN;
+                Values[minus2Plot][barsAgo]= double.NaN;
+                return;
+            }
+
+            if (volume > 0)
+            {
+                sumPV  += price * volume;
+                sumV   += volume;
+                sumP2V += price * price * volume;
+            }
+
+            double vwap;
+            double stdDev;
+
+            if (sumV == 0)
+            {
+                vwap   = price;
+                stdDev = 0.0;
+            }
+            else
+            {
+                vwap = sumPV / sumV;
+                double meanP2 = sumP2V / sumV;
+                double variance = meanP2 - vwap * vwap;
+                if (variance < 0)
+                    variance = 0;
+                stdDev = Math.Sqrt(variance);
+            }
+
+            Values[vwapPlot][barsAgo] = vwap;
+
+            if (showBands1)
+            {
+                Values[plus1Plot][barsAgo]  = vwap + stdDev;
+                Values[minus1Plot][barsAgo] = vwap - stdDev;
+            }
+            else
+            {
+                Values[plus1Plot][barsAgo]  = double.NaN;
+                Values[minus1Plot][barsAgo] = double.NaN;
+            }
+
+            if (showBands2)
+            {
+                Values[plus2Plot][barsAgo]  = vwap + 2.0 * stdDev;
+                Values[minus2Plot][barsAgo] = vwap - 2.0 * stdDev;
+            }
+            else
+            {
+                Values[plus2Plot][barsAgo]  = double.NaN;
+                Values[minus2Plot][barsAgo] = double.NaN;
+            }
+        }
+
+        private bool TrySnapAnchor(DateTime requested, out DateTime snapped)
+        {
+            snapped = requested;
+
+            if (Bars == null || CurrentBar < 0)
+                return false;
+
+            DateTime? bestCandidate = null;
+
+            for (int barsAgo = 0; barsAgo <= CurrentBar; barsAgo++)
+            {
+                DateTime candidate = Time[barsAgo];
+                if (candidate >= requested && (bestCandidate == null || candidate < bestCandidate.Value))
+                    bestCandidate = candidate;
+            }
+
+            if (bestCandidate.HasValue)
+            {
+                snapped = bestCandidate.Value;
+                return true;
+            }
+
+            return false;
+        }
+
+        private void EnsureAnchorLine(ref VerticalLine line, string tag, ref bool dirty, DateTime anchorTime, Brush brush)
+        {
+            if (!dirty && line != null)
+            {
+                if (line.Stroke != null)
+                    line.Stroke.Brush = brush;
+                line.IsLocked = false;
+                return;
+            }
+
+            if (line == null)
+            {
+                line = Draw.VerticalLine(this, tag, anchorTime, brush);
+            }
+            else
+            {
+                line.StartAnchor.Time = anchorTime;
+                if (line.Stroke != null)
+                    line.Stroke.Brush = brush;
+            }
+
+            if (line != null)
+                line.IsLocked = false;
+
+            dirty = false;
         }
 
         private void SetAllNan()
