@@ -207,10 +207,16 @@ namespace NinjaTrader.NinjaScript.Indicators
         private DateTime BuildAnchorDateTime(DateTime datePart, string timePart)
         {
             TimeSpan parsedTime;
-            if (!TimeSpan.TryParseExact(timePart, "HH\\:mm", CultureInfo.InvariantCulture, out parsedTime))
-                parsedTime = TimeSpan.Zero;
+            if (TimeSpan.TryParseExact(timePart, "HH\\:mm", CultureInfo.InvariantCulture, out parsedTime))
+                return datePart.Date + parsedTime;
 
-            return datePart.Date + parsedTime;
+            if (TimeSpan.TryParseExact(timePart, "HH\\:mm\\:ss", CultureInfo.InvariantCulture, out parsedTime))
+                return datePart.Date + parsedTime;
+
+            if (TimeSpan.TryParse(timePart, CultureInfo.InvariantCulture, out parsedTime))
+                return datePart.Date + parsedTime;
+
+            return datePart.Date;
         }
 
         private void SetAllNan()
