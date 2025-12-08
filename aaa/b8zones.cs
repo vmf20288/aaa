@@ -553,9 +553,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                 return;
 
             // Pinceles y línea discontinua
-            brushFill    ??= new SolidColorBrush(RenderTarget, new Color(0.8f, 0.8f, 0.8f, 0.4f));
-            brushOutline ??= new SolidColorBrush(RenderTarget, new Color(0f, 0f, 0f, 1f));
-            brushAoi     ??= new SolidColorBrush(RenderTarget, new Color(0.7f, 0.7f, 0.7f, 1f));
+            brushFill    ??= new SolidColorBrush(RenderTarget, new Color(0.35f, 0.35f, 0.35f, 0.35f));
+            brushOutline ??= new SolidColorBrush(RenderTarget, new Color(0.75f, 0.75f, 0.75f, 1f));
+            brushAoi     ??= new SolidColorBrush(RenderTarget, new Color(0.9f, 0.9f, 0.9f, 1f));
 
             if (strokeStyleDotted == null)
             {
