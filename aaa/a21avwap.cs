@@ -37,6 +37,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 IsOverlay                 = true;
                 IsSuspendedWhileInactive  = true;
 
+                BarsRequiredToPlot        = 0;
+
                 ShowAnchored              = true;
                 Anchored1                 = true;
                 Anchored2                 = false;
