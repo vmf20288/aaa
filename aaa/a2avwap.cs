@@ -174,6 +174,8 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (newAnchor1 != anchor1DateTime)
             {
                 anchor1DateTime = newAnchor1;
+                Anchor1Date     = anchor1DateTime.Date;
+                Anchor1Time     = anchor1DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
                 needsFullRecalc = true;
                 anchor1LineDirty = true;
             }
@@ -184,6 +186,8 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (newAnchor2 != anchor2DateTime)
             {
                 anchor2DateTime = newAnchor2;
+                Anchor2Date     = anchor2DateTime.Date;
+                Anchor2Time     = anchor2DateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
                 needsFullRecalc = true;
                 anchor2LineDirty = true;
             }
@@ -560,12 +564,18 @@ namespace NinjaTrader.NinjaScript.Indicators
                 return false;
 
             DateTime? bestCandidate = null;
+            long      bestDistance  = long.MaxValue;
 
             for (int barsAgo = 0; barsAgo <= CurrentBar; barsAgo++)
             {
                 DateTime candidate = Time[barsAgo];
-                if (candidate >= requested && (bestCandidate == null || candidate < bestCandidate.Value))
+                long distance      = Math.Abs((candidate - requested).Ticks);
+
+                if (distance < bestDistance || (distance == bestDistance && bestCandidate.HasValue && candidate < bestCandidate.Value))
+                {
+                    bestDistance  = distance;
                     bestCandidate = candidate;
+                }
             }
 
             if (bestCandidate.HasValue)
