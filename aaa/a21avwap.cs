@@ -3,11 +3,10 @@ using System;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
-using System.Xml.Serialization;
 using System.Windows.Media;
 using NinjaTrader.Data;
+using NinjaTrader.Gui;
 using NinjaTrader.Gui.NinjaScript;
-using NinjaTrader.Gui.Tools;
 using NinjaTrader.NinjaScript;
 using NinjaTrader.NinjaScript.Indicators;
 
@@ -33,7 +32,6 @@ namespace NinjaTrader.NinjaScript.Indicators
         private double      weeklySumP2V;
         private double      weeklySumV;
         private DateTime    currentWeekStart;
-        private static readonly BrushConverter brushConverter = new BrushConverter();
 
         protected override void OnStateChange()
         {
@@ -68,45 +66,71 @@ namespace NinjaTrader.NinjaScript.Indicators
                 ShowWeeklyBand1           = true;
                 ShowWeeklyBand2           = false;
 
-                Anchor1VwapColor          = Brushes.Blue;
-                Anchor1Band1Color         = Brushes.Green;
-                Anchor1Band2Color         = Brushes.Green;
+                AddPlot(Brushes.DodgerBlue, "AnchoredVWAP1");
+                AddPlot(Brushes.DodgerBlue, "Anchored1+1");
+                AddPlot(Brushes.DodgerBlue, "Anchored1-1");
+                AddPlot(Brushes.DodgerBlue, "Anchored1+2");
+                AddPlot(Brushes.DodgerBlue, "Anchored1-2");
 
-                Anchor2VwapColor          = Brushes.Blue;
-                Anchor2Band1Color         = Brushes.Green;
-                Anchor2Band2Color         = Brushes.Green;
+                AddPlot(Brushes.DodgerBlue, "AnchoredVWAP2");
+                AddPlot(Brushes.DodgerBlue, "Anchored2+1");
+                AddPlot(Brushes.DodgerBlue, "Anchored2-1");
+                AddPlot(Brushes.DodgerBlue, "Anchored2+2");
+                AddPlot(Brushes.DodgerBlue, "Anchored2-2");
 
-                SessionVwapColor          = Brushes.Blue;
-                SessionBand1Color         = Brushes.Green;
-                SessionBand2Color         = Brushes.Green;
+                AddPlot(Brushes.DodgerBlue, "SessionVWAP");
+                AddPlot(Brushes.DodgerBlue, "Session+1");
+                AddPlot(Brushes.DodgerBlue, "Session-1");
+                AddPlot(Brushes.DodgerBlue, "Session+2");
+                AddPlot(Brushes.DodgerBlue, "Session-2");
 
-                WeeklyVwapColor           = Brushes.Blue;
-                WeeklyBand1Color          = Brushes.Green;
-                WeeklyBand2Color          = Brushes.Green;
+                AddPlot(Brushes.DodgerBlue, "WeeklyVWAP");
+                AddPlot(Brushes.DodgerBlue, "Weekly+1");
+                AddPlot(Brushes.DodgerBlue, "Weekly-1");
+                AddPlot(Brushes.DodgerBlue, "Weekly+2");
+                AddPlot(Brushes.DodgerBlue, "Weekly-2");
 
-                AddPlot(Anchor1VwapColor,  "AnchoredVWAP1");
-                AddPlot(Anchor1Band1Color, "Anchored1+1");
-                AddPlot(Anchor1Band1Color, "Anchored1-1");
-                AddPlot(Anchor1Band2Color, "Anchored1+2");
-                AddPlot(Anchor1Band2Color, "Anchored1-2");
+                Plots[0].DashStyleHelper  = DashStyleHelper.Dash;
+                Plots[1].DashStyleHelper  = DashStyleHelper.Dash;
+                Plots[2].DashStyleHelper  = DashStyleHelper.Dash;
+                Plots[3].DashStyleHelper  = DashStyleHelper.Dash;
+                Plots[4].DashStyleHelper  = DashStyleHelper.Dash;
+                Plots[5].DashStyleHelper  = DashStyleHelper.Dash;
+                Plots[6].DashStyleHelper  = DashStyleHelper.Dash;
+                Plots[7].DashStyleHelper  = DashStyleHelper.Dash;
+                Plots[8].DashStyleHelper  = DashStyleHelper.Dash;
+                Plots[9].DashStyleHelper  = DashStyleHelper.Dash;
+                Plots[10].DashStyleHelper = DashStyleHelper.Dot;
+                Plots[11].DashStyleHelper = DashStyleHelper.Dot;
+                Plots[12].DashStyleHelper = DashStyleHelper.Dot;
+                Plots[13].DashStyleHelper = DashStyleHelper.Dot;
+                Plots[14].DashStyleHelper = DashStyleHelper.Dot;
+                Plots[15].DashStyleHelper = DashStyleHelper.Solid;
+                Plots[16].DashStyleHelper = DashStyleHelper.Solid;
+                Plots[17].DashStyleHelper = DashStyleHelper.Solid;
+                Plots[18].DashStyleHelper = DashStyleHelper.Solid;
+                Plots[19].DashStyleHelper = DashStyleHelper.Solid;
 
-                AddPlot(Anchor2VwapColor,  "AnchoredVWAP2");
-                AddPlot(Anchor2Band1Color, "Anchored2+1");
-                AddPlot(Anchor2Band1Color, "Anchored2-1");
-                AddPlot(Anchor2Band2Color, "Anchored2+2");
-                AddPlot(Anchor2Band2Color, "Anchored2-2");
-
-                AddPlot(SessionVwapColor,  "SessionVWAP");
-                AddPlot(SessionBand1Color, "Session+1");
-                AddPlot(SessionBand1Color, "Session-1");
-                AddPlot(SessionBand2Color, "Session+2");
-                AddPlot(SessionBand2Color, "Session-2");
-
-                AddPlot(WeeklyVwapColor,   "WeeklyVWAP");
-                AddPlot(WeeklyBand1Color,  "Weekly+1");
-                AddPlot(WeeklyBand1Color,  "Weekly-1");
-                AddPlot(WeeklyBand2Color,  "Weekly+2");
-                AddPlot(WeeklyBand2Color,  "Weekly-2");
+                Plots[0].Width  = 2;
+                Plots[1].Width  = 1;
+                Plots[2].Width  = 1;
+                Plots[3].Width  = 1;
+                Plots[4].Width  = 1;
+                Plots[5].Width  = 2;
+                Plots[6].Width  = 1;
+                Plots[7].Width  = 1;
+                Plots[8].Width  = 1;
+                Plots[9].Width  = 1;
+                Plots[10].Width = 2;
+                Plots[11].Width = 1;
+                Plots[12].Width = 1;
+                Plots[13].Width = 1;
+                Plots[14].Width = 1;
+                Plots[15].Width = 2;
+                Plots[16].Width = 1;
+                Plots[17].Width = 1;
+                Plots[18].Width = 1;
+                Plots[19].Width = 1;
             }
             else if (State == State.DataLoaded)
             {
@@ -124,7 +148,6 @@ namespace NinjaTrader.NinjaScript.Indicators
                 sessionSumPV   = sessionSumP2V = sessionSumV = 0;
                 weeklySumPV    = weeklySumP2V = weeklySumV = 0;
                 currentWeekStart = DateTime.MinValue;
-                UpdatePlotBrushes();
             }
         }
 
@@ -140,8 +163,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 // Resolve anchor DateTime from current properties in case user modified them
                 UpdateAnchorDateTimes();
 
-                ProcessAnchor(ref anchor1, Anchored1, ShowAnchor1Band1, ShowAnchor1Band2, Anchor1VwapColor, Anchor1Band1Color, Anchor1Band2Color, 0);
-                ProcessAnchor(ref anchor2, Anchored2, ShowAnchor2Band1, ShowAnchor2Band2, Anchor2VwapColor, Anchor2Band1Color, Anchor2Band2Color, 5);
+                ProcessAnchor(ref anchor1, Anchored1, ShowAnchor1Band1, ShowAnchor1Band2, 0);
+                ProcessAnchor(ref anchor2, Anchored2, ShowAnchor2Band1, ShowAnchor2Band2, 5);
             }
 
             ProcessSessionVwap();
@@ -177,7 +200,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
         }
 
-        private void ProcessAnchor(ref AnchorState anchorState, bool enabled, bool showBand1, bool showBand2, Brush vwapColor, Brush band1Color, Brush band2Color, int plotOffset)
+        private void ProcessAnchor(ref AnchorState anchorState, bool enabled, bool showBand1, bool showBand2, int plotOffset)
         {
             if (!enabled)
             {
@@ -216,8 +239,6 @@ namespace NinjaTrader.NinjaScript.Indicators
             double vwap     = anchorState.SumPV / anchorState.SumV;
             double variance = (anchorState.SumP2V / anchorState.SumV) - vwap * vwap;
             double stdDev   = variance > 0 ? Math.Sqrt(variance) : 0;
-
-            UpdatePlotColors(plotOffset, vwapColor, band1Color, band2Color);
 
             Values[plotOffset][0] = vwap;
             Values[plotOffset + 1][0] = showBand1 ? vwap + stdDev : double.NaN;
@@ -306,8 +327,6 @@ namespace NinjaTrader.NinjaScript.Indicators
             double variance = (sessionSumP2V / sessionSumV) - vwap * vwap;
             double stdDev   = variance > 0 ? Math.Sqrt(variance) : 0;
 
-            UpdatePlotColors(10, SessionVwapColor, SessionBand1Color, SessionBand2Color);
-
             Values[10][0] = vwap;
             Values[11][0] = ShowSessionBand1 ? vwap + stdDev : double.NaN;
             Values[12][0] = ShowSessionBand1 ? vwap - stdDev : double.NaN;
@@ -357,30 +376,11 @@ namespace NinjaTrader.NinjaScript.Indicators
             double variance = (weeklySumP2V / weeklySumV) - vwap * vwap;
             double stdDev   = variance > 0 ? Math.Sqrt(variance) : 0;
 
-            UpdatePlotColors(15, WeeklyVwapColor, WeeklyBand1Color, WeeklyBand2Color);
-
             Values[15][0] = vwap;
             Values[16][0] = ShowWeeklyBand1 ? vwap + stdDev : double.NaN;
             Values[17][0] = ShowWeeklyBand1 ? vwap - stdDev : double.NaN;
             Values[18][0] = ShowWeeklyBand2 ? vwap + 2 * stdDev : double.NaN;
             Values[19][0] = ShowWeeklyBand2 ? vwap - 2 * stdDev : double.NaN;
-        }
-
-        private void UpdatePlotBrushes()
-        {
-            UpdatePlotColors(0, Anchor1VwapColor, Anchor1Band1Color, Anchor1Band2Color);
-            UpdatePlotColors(5, Anchor2VwapColor, Anchor2Band1Color, Anchor2Band2Color);
-            UpdatePlotColors(10, SessionVwapColor, SessionBand1Color, SessionBand2Color);
-            UpdatePlotColors(15, WeeklyVwapColor, WeeklyBand1Color, WeeklyBand2Color);
-        }
-
-        private void UpdatePlotColors(int offset, Brush vwapBrush, Brush band1Brush, Brush band2Brush)
-        {
-            PlotBrushes[offset][0]     = vwapBrush;
-            PlotBrushes[offset + 1][0] = band1Brush;
-            PlotBrushes[offset + 2][0] = band1Brush;
-            PlotBrushes[offset + 3][0] = band2Brush;
-            PlotBrushes[offset + 4][0] = band2Brush;
         }
 
         #region Properties
@@ -421,42 +421,6 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "show banda +-2", Order = 4, GroupName = "Anchored 1")]
         public bool ShowAnchor1Band2 { get; set; }
 
-        [XmlIgnore]
-        [Category("Anchored 1")]
-        [Display(Name = "anchored vwap color", Order = 5, GroupName = "Anchored 1")]
-        public Brush Anchor1VwapColor { get; set; }
-
-        [Browsable(false)]
-        public string Anchor1VwapColorSerializable
-        {
-            get { return BrushToString(Anchor1VwapColor); }
-            set { Anchor1VwapColor = StringToBrush(value); }
-        }
-
-        [XmlIgnore]
-        [Category("Anchored 1")]
-        [Display(Name = "anchored vwap +-1 color", Order = 6, GroupName = "Anchored 1")]
-        public Brush Anchor1Band1Color { get; set; }
-
-        [Browsable(false)]
-        public string Anchor1Band1ColorSerializable
-        {
-            get { return BrushToString(Anchor1Band1Color); }
-            set { Anchor1Band1Color = StringToBrush(value); }
-        }
-
-        [XmlIgnore]
-        [Category("Anchored 1")]
-        [Display(Name = "anchored vwap +-2 color", Order = 7, GroupName = "Anchored 1")]
-        public Brush Anchor1Band2Color { get; set; }
-
-        [Browsable(false)]
-        public string Anchor1Band2ColorSerializable
-        {
-            get { return BrushToString(Anchor1Band2Color); }
-            set { Anchor1Band2Color = StringToBrush(value); }
-        }
-
         [Category("Anchored 2")]
         [Display(Name = "fecha", Order = 1, GroupName = "Anchored 2")]
         public DateTime Anchor2Date { get; set; }
@@ -473,42 +437,6 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "show banda +-2", Order = 4, GroupName = "Anchored 2")]
         public bool ShowAnchor2Band2 { get; set; }
 
-        [XmlIgnore]
-        [Category("Anchored 2")]
-        [Display(Name = "anchored 2 vwap color", Order = 5, GroupName = "Anchored 2")]
-        public Brush Anchor2VwapColor { get; set; }
-
-        [Browsable(false)]
-        public string Anchor2VwapColorSerializable
-        {
-            get { return BrushToString(Anchor2VwapColor); }
-            set { Anchor2VwapColor = StringToBrush(value); }
-        }
-
-        [XmlIgnore]
-        [Category("Anchored 2")]
-        [Display(Name = "anchored 2 vwap +-1 color", Order = 6, GroupName = "Anchored 2")]
-        public Brush Anchor2Band1Color { get; set; }
-
-        [Browsable(false)]
-        public string Anchor2Band1ColorSerializable
-        {
-            get { return BrushToString(Anchor2Band1Color); }
-            set { Anchor2Band1Color = StringToBrush(value); }
-        }
-
-        [XmlIgnore]
-        [Category("Anchored 2")]
-        [Display(Name = "anchored vwap 2 +-2 color", Order = 7, GroupName = "Anchored 2")]
-        public Brush Anchor2Band2Color { get; set; }
-
-        [Browsable(false)]
-        public string Anchor2Band2ColorSerializable
-        {
-            get { return BrushToString(Anchor2Band2Color); }
-            set { Anchor2Band2Color = StringToBrush(value); }
-        }
-
         [Category("vwap session")]
         [Display(Name = "show band +-1", Order = 1, GroupName = "vwap session")]
         public bool ShowSessionBand1 { get; set; }
@@ -517,42 +445,6 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "show band +-2", Order = 2, GroupName = "vwap session")]
         public bool ShowSessionBand2 { get; set; }
 
-        [XmlIgnore]
-        [Category("vwap session")]
-        [Display(Name = "vwap color", Order = 3, GroupName = "vwap session")]
-        public Brush SessionVwapColor { get; set; }
-
-        [Browsable(false)]
-        public string SessionVwapColorSerializable
-        {
-            get { return BrushToString(SessionVwapColor); }
-            set { SessionVwapColor = StringToBrush(value); }
-        }
-
-        [XmlIgnore]
-        [Category("vwap session")]
-        [Display(Name = "vwap +- 1 color", Order = 4, GroupName = "vwap session")]
-        public Brush SessionBand1Color { get; set; }
-
-        [Browsable(false)]
-        public string SessionBand1ColorSerializable
-        {
-            get { return BrushToString(SessionBand1Color); }
-            set { SessionBand1Color = StringToBrush(value); }
-        }
-
-        [XmlIgnore]
-        [Category("vwap session")]
-        [Display(Name = "vwap +-2 color", Order = 5, GroupName = "vwap session")]
-        public Brush SessionBand2Color { get; set; }
-
-        [Browsable(false)]
-        public string SessionBand2ColorSerializable
-        {
-            get { return BrushToString(SessionBand2Color); }
-            set { SessionBand2Color = StringToBrush(value); }
-        }
-
         [Category("vwap weekly")]
         [Display(Name = "show band +-1", Order = 1, GroupName = "vwap weekly")]
         public bool ShowWeeklyBand1 { get; set; }
@@ -560,54 +452,6 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Category("vwap weekly")]
         [Display(Name = "show band +-2", Order = 2, GroupName = "vwap weekly")]
         public bool ShowWeeklyBand2 { get; set; }
-
-        [XmlIgnore]
-        [Category("vwap weekly")]
-        [Display(Name = "vwap color", Order = 3, GroupName = "vwap weekly")]
-        public Brush WeeklyVwapColor { get; set; }
-
-        [Browsable(false)]
-        public string WeeklyVwapColorSerializable
-        {
-            get { return BrushToString(WeeklyVwapColor); }
-            set { WeeklyVwapColor = StringToBrush(value); }
-        }
-
-        [XmlIgnore]
-        [Category("vwap weekly")]
-        [Display(Name = "vwap +- 1 color", Order = 4, GroupName = "vwap weekly")]
-        public Brush WeeklyBand1Color { get; set; }
-
-        [Browsable(false)]
-        public string WeeklyBand1ColorSerializable
-        {
-            get { return BrushToString(WeeklyBand1Color); }
-            set { WeeklyBand1Color = StringToBrush(value); }
-        }
-
-        [XmlIgnore]
-        [Category("vwap weekly")]
-        [Display(Name = "vwap +-2 color", Order = 5, GroupName = "vwap weekly")]
-        public Brush WeeklyBand2Color { get; set; }
-
-        [Browsable(false)]
-        public string WeeklyBand2ColorSerializable
-        {
-            get { return BrushToString(WeeklyBand2Color); }
-            set { WeeklyBand2Color = StringToBrush(value); }
-        }
-
-        private static string BrushToString(Brush brush)
-        {
-            return brush == null ? null : brushConverter.ConvertToString(brush);
-        }
-
-        private static Brush StringToBrush(string serialized)
-        {
-            return string.IsNullOrEmpty(serialized)
-                ? null
-                : (Brush)brushConverter.ConvertFromString(serialized);
-        }
 
         #endregion
     }
