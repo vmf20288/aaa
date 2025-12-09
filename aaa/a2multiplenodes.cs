@@ -453,30 +453,50 @@ namespace NinjaTrader.NinjaScript.Indicators
             };
 
             activeLevels.Add(lvl);
-            DrawLevel(lvl, Brushes.Gold); // pendiente
+            DrawLevel(lvl, Brushes.DarkOrange); // pendiente
         }
 
         private void DrawLevel(Level lvl, Brush brush)
         {
             string labelText = GetLabelText(lvl);
-            // Ray horizontal desde el tiempo de creación hacia la derecha
-            Draw.Ray(this, lvl.Tag, lvl.StartTime, lvl.Price, lvl.StartTime.AddMinutes(1), lvl.Price, brush, DashStyleHelper.Solid, 2);
 
-            // Etiqueta cerca del inicio
+            // Línea SIEMPRE DarkOrange
+            Brush lineBrush = Brushes.DarkOrange;
+
+            // Color del texto = el brush que le pasas (Gold al crear, o LimeGreen/Red al recolorear)
+            Brush textBrush = brush;
+
+            // Ray horizontal
+            Draw.Ray(this, lvl.Tag,
+                     lvl.StartTime, lvl.Price,
+                     lvl.StartTime.AddMinutes(1), lvl.Price,
+                     lineBrush, DashStyleHelper.Solid, 2);
+
+            // Etiqueta X / XM
             Draw.Text(this, lvl.Tag + "_label", false, labelText,
                       lvl.StartTime, lvl.Price + 2 * tickSize, 0,
-                      brush, labelFont, TextAlignment.Left,
+                      textBrush, labelFont, TextAlignment.Left,
                       Brushes.Transparent, Brushes.Transparent, 0);
         }
 
         private void RecolorLevel(Level lvl, Brush brush)
         {
             string labelText = GetLabelText(lvl);
-            Draw.Ray(this, lvl.Tag, lvl.StartTime, lvl.Price, lvl.StartTime.AddMinutes(1), lvl.Price, brush, DashStyleHelper.Solid, 2);
+
+            // Línea sigue siendo DarkOrange
+            Brush lineBrush = Brushes.DarkOrange;
+
+            // Texto usa el brush pasado (Gold / LimeGreen / Red)
+            Brush textBrush = brush;
+
+            Draw.Ray(this, lvl.Tag,
+                     lvl.StartTime, lvl.Price,
+                     lvl.StartTime.AddMinutes(1), lvl.Price,
+                     lineBrush, DashStyleHelper.Solid, 2);
 
             Draw.Text(this, lvl.Tag + "_label", false, labelText,
                       lvl.StartTime, lvl.Price + 2 * tickSize, 0,
-                      brush, labelFont, TextAlignment.Left,
+                      textBrush, labelFont, TextAlignment.Left,
                       Brushes.Transparent, Brushes.Transparent, 0);
         }
 
