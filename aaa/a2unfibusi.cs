@@ -76,8 +76,8 @@ namespace NinjaTrader.NinjaScript.Indicators
         private SimpleFont textFont;
 
         // Colores/estilo (fijos en v1 para simplificar)
-        private Brush brushHigh = Brushes.Red;
-        private Brush brushLow  = Brushes.Green;
+        private Brush brushHigh = Brushes.DarkOrange;
+        private Brush brushLow  = Brushes.DarkOrange;
 
         private static readonly MethodInfo drawLineTimeWithStyle;
         private static readonly MethodInfo drawLineTimeWidthOnly;
