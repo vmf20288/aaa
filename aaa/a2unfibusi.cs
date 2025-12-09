@@ -136,7 +136,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         public bool ResetAtSessionStart { get; set; } = true;
 
         [Browsable(false), XmlIgnore]
-        public int LineWidth { get; set; } = 2;
+        public int LineWidth { get; set; } = 1;
 
         [Browsable(false), XmlIgnore]
         public int TextOffsetTicks { get; set; } = 1;
