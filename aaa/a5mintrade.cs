@@ -641,12 +641,24 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             double yText = lv.Price + (2 * ts);
 
+            var font = new SimpleFont("Arial", 14)   // <-- tamaño 14, cámbialo a gusto
+            {
+                Bold = true                          // <-- “más grueso” (negrita)
+            };
+
             Draw.Text(this,
                       lv.TagText,
+                      false,                         // isAutoScale
                       lv.Volume.ToString(CultureInfo.InvariantCulture),
                       GetPrimaryBarsAgo(lv.TickTime),
                       yText,
-                      textBrush);
+                      0,                             // yPixelOffset
+                      textBrush,
+                      font,
+                      System.Windows.TextAlignment.Center,
+                      Brushes.Transparent,           // outlineBrush
+                      Brushes.Transparent,           // areaBrush
+                      0);                            // areaOpacity
         }
 
         private void FreezeLineAtCurrent(MinTradeLevel lv)
