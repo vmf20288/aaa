@@ -134,15 +134,6 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
             else if (State == State.DataLoaded)
             {
-                // Ajustar la fecha por defecto a la del primer bar disponible si el usuario no la cambió
-                DateTime firstBarDate = Bars.Count > 0 ? Bars.GetTime(0).Date : DateTime.Today;
-
-                if (Anchor1Date.Date == DateTime.Today)
-                    Anchor1Date = firstBarDate;
-
-                if (Anchor2Date.Date == DateTime.Today)
-                    Anchor2Date = firstBarDate;
-
                 anchor1 = InitializeAnchor(Anchor1Date, Anchor1Time);
                 anchor2 = InitializeAnchor(Anchor2Date, Anchor2Time);
                 sessionSumPV   = sessionSumP2V = sessionSumV = 0;
