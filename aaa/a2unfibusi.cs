@@ -75,10 +75,6 @@ namespace NinjaTrader.NinjaScript.Indicators
         private int computeSeriesIndex = -1;            // índice de la serie volumétrica interna
         private SimpleFont textFont;
 
-        // Colores/estilo (fijos en v1 para simplificar)
-        private Brush brushHigh = Brushes.DarkOrange;
-        private Brush brushLow  = Brushes.DarkOrange;
-
         private static readonly MethodInfo drawLineTimeWithStyle;
         private static readonly MethodInfo drawLineTimeWidthOnly;
         private static readonly MethodInfo drawLineTimeBasic;
@@ -140,6 +136,17 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         [Browsable(false), XmlIgnore]
         public int TextOffsetTicks { get; set; } = 1;
+
+        [XmlIgnore]
+        [Display(Name = "Color linea", GroupName = "a2unfibusi", Order = 3)]
+        public Brush ColorLinea { get; set; } = Brushes.Gold;
+
+        [Browsable(false)]
+        public string ColorLineaSerializable
+        {
+            get { return Serialize.BrushToString(ColorLinea); }
+            set { ColorLinea = Serialize.StringToBrush(value); }
+        }
 
         // -------------------------
         // Ciclo de vida
@@ -257,7 +264,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private void DrawLevelLine(UBLevel lvl, DateTime startTime, DateTime endTime)
         {
-            Brush b = lvl.IsHigh ? brushHigh : brushLow;
+            Brush b = ColorLinea;
             if (drawLineTimeWithStyle != null && dashStyleDashValue != null)
             {
                 drawLineTimeWithStyle.Invoke(null, new object[] { this, lvl.TagLine, false, startTime, lvl.Price, endTime, lvl.Price, b, dashStyleDashValue, LineWidth });
@@ -280,7 +287,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             // Texto "UB" ligeramente por encima de la línea
             double y = lvl.Price + TextOffsetTicks * TickSize;
-            Brush  b = lvl.IsHigh ? brushHigh : brushLow;
+            Brush  b = ColorLinea;
 
             Draw.Text(this, lvl.TagText, false, "UB",
                       lvl.DetectedTime, y, 0, b, textFont, System.Windows.TextAlignment.Left, null, null, 0);
