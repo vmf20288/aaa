@@ -144,8 +144,8 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Browsable(false)]
         public string ColorLineaSerializable
         {
-            get { return Serialize.BrushToString(ColorLinea); }
-            set { ColorLinea = Serialize.StringToBrush(value); }
+            get { return NinjaTrader.Gui.Tools.Serialize.BrushToString(ColorLinea); }
+            set { ColorLinea = NinjaTrader.Gui.Tools.Serialize.StringToBrush(value); }
         }
 
         // -------------------------
