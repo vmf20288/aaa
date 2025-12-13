@@ -103,6 +103,18 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "Tolerancia ticks (cierre 1m)", GroupName = "Gestión de niveles", Order = 12)]
         public int ToleranciaTicks { get; set; } = 6;
 
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Color linea", GroupName = "Gestión de niveles", Order = 12)]
+        public Brush ColorLinea { get; set; } = Brushes.Gold;
+
+        [Browsable(false)]
+        public string ColorLineaSerializable
+        {
+            get { return Serialize.BrushToString(ColorLinea); }
+            set { ColorLinea = Serialize.StringToBrush(value); }
+        }
+
         // ---- (OCULTO) Borrado sólo por cierre: fijo en ON y OneMinute
         [Browsable(false)]
         [XmlIgnore]
@@ -160,6 +172,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 // Visible
                 ToleranciaTicks   = 6;
+                ColorLinea        = Brushes.Gold;
                 ShowHistory       = true;
                 RestartSession    = true;
             }
@@ -460,8 +473,8 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             string labelText = GetLabelText(lvl);
 
-            // Línea SIEMPRE DarkOrange
-            Brush lineBrush = Brushes.DarkOrange;
+            // Línea activa
+            Brush lineBrush = ColorLinea;
 
             // Color del texto = el brush que le pasas (Gold al crear, o LimeGreen/Red al recolorear)
             Brush textBrush = brush;
@@ -483,8 +496,8 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             string labelText = GetLabelText(lvl);
 
-            // Línea sigue siendo DarkOrange
-            Brush lineBrush = Brushes.DarkOrange;
+            // Línea activa
+            Brush lineBrush = ColorLinea;
 
             // Texto usa el brush pasado (Gold / LimeGreen / Red)
             Brush textBrush = brush;
