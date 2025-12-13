@@ -8,6 +8,7 @@ using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Windows.Media;
+using NinjaTrader.Gui;
 using NinjaTrader.Data;
 using NinjaTrader.Gui.Tools;
 using NinjaTrader.NinjaScript;
@@ -144,8 +145,8 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Browsable(false)]
         public string ColorLineaSerializable
         {
-            get { return NinjaTrader.Gui.Tools.Serialize.BrushToString(ColorLinea); }
-            set { ColorLinea = NinjaTrader.Gui.Tools.Serialize.StringToBrush(value); }
+            get { return Serialize.BrushToString(ColorLinea); }
+            set { ColorLinea = Serialize.StringToBrush(value); }
         }
 
         // -------------------------
