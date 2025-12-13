@@ -601,6 +601,14 @@ namespace NinjaTrader.NinjaScript.Indicators
             int startBarsAgo = GetPrimaryBarsAgo(lv.TickTime);
             if (startBarsAgo == int.MinValue) return;
 
+            if (startBarsAgo == 0)
+            {
+                var ray = Draw.Ray(this, lv.TagLineActive, lv.TickTime, lv.Price, lv.TickTime.AddMilliseconds(1), lv.Price, brush);
+                if (ray != null && ray.Stroke != null)
+                    ray.Stroke.Width = 2;
+                return;
+            }
+
             int endBarsAgo = 0;
             if (startBarsAgo <= endBarsAgo)
             {
@@ -617,6 +625,14 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             int startBarsAgo = GetPrimaryBarsAgo(lv.TickTime);
             if (startBarsAgo == int.MinValue) return;
+
+            if (startBarsAgo == 0)
+            {
+                var ray = Draw.Ray(this, lv.TagLineActive, lv.TickTime, lv.Price, lv.TickTime.AddMilliseconds(1), lv.Price, brush);
+                if (ray != null && ray.Stroke != null)
+                    ray.Stroke.Width = 2;
+                return;
+            }
 
             int endBarsAgo = 0;
             if (startBarsAgo <= endBarsAgo)
@@ -672,6 +688,15 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             int startBarsAgo = GetPrimaryBarsAgo(lv.TickTime);
             if (startBarsAgo == int.MinValue) return;
+
+            if (startBarsAgo == 0)
+            {
+                // Firma con isAutoScale explícito para NT8
+                var line = Draw.Line(this, lv.TagLineFrozen, false, lv.TickTime, lv.Price, lv.TickTime.AddMilliseconds(1), lv.Price, segBrush, DashStyleHelper.Solid, 2);
+                if (line != null && line.Stroke != null)
+                    line.Stroke.Width = 2;
+                return;
+            }
 
             int endBarsAgo = 0;
             if (startBarsAgo <= endBarsAgo)
