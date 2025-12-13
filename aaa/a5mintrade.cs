@@ -603,9 +603,9 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             if (startBarsAgo == 0)
             {
-                var activeRay = Draw.Ray(this, lv.TagLineActive, lv.TickTime, lv.Price, lv.TickTime.AddMilliseconds(1), lv.Price, brush);
-                if (activeRay != null && activeRay.Stroke != null)
-                    activeRay.Stroke.Width = 2;
+                var activeRayTime = Draw.Ray(this, lv.TagLineActive, lv.TickTime, lv.Price, lv.TickTime.AddMilliseconds(1), lv.Price, brush);
+                if (activeRayTime != null && activeRayTime.Stroke != null)
+                    activeRayTime.Stroke.Width = 2;
                 return;
             }
 
@@ -616,9 +616,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                 else return;
             }
 
-            var activeRay = Draw.Ray(this, lv.TagLineActive, startBarsAgo, lv.Price, endBarsAgo, lv.Price, brush);
-            if (activeRay != null && activeRay.Stroke != null)
-                activeRay.Stroke.Width = 2;
+            var activeRayBars = Draw.Ray(this, lv.TagLineActive, startBarsAgo, lv.Price, endBarsAgo, lv.Price, brush);
+            if (activeRayBars != null && activeRayBars.Stroke != null)
+                activeRayBars.Stroke.Width = 2;
         }
 
         private void UpdateActiveRayColor(MinTradeLevel lv, Brush brush)
@@ -628,9 +628,9 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             if (startBarsAgo == 0)
             {
-                var activeRay = Draw.Ray(this, lv.TagLineActive, lv.TickTime, lv.Price, lv.TickTime.AddMilliseconds(1), lv.Price, brush);
-                if (activeRay != null && activeRay.Stroke != null)
-                    activeRay.Stroke.Width = 2;
+                var activeRayTime = Draw.Ray(this, lv.TagLineActive, lv.TickTime, lv.Price, lv.TickTime.AddMilliseconds(1), lv.Price, brush);
+                if (activeRayTime != null && activeRayTime.Stroke != null)
+                    activeRayTime.Stroke.Width = 2;
                 return;
             }
 
@@ -641,9 +641,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                 else return;
             }
 
-            var activeRay = Draw.Ray(this, lv.TagLineActive, startBarsAgo, lv.Price, endBarsAgo, lv.Price, brush);
-            if (activeRay != null && activeRay.Stroke != null)
-                activeRay.Stroke.Width = 2;
+            var activeRayBars = Draw.Ray(this, lv.TagLineActive, startBarsAgo, lv.Price, endBarsAgo, lv.Price, brush);
+            if (activeRayBars != null && activeRayBars.Stroke != null)
+                activeRayBars.Stroke.Width = 2;
         }
 
         private void DrawEventText(MinTradeLevel lv)
@@ -692,9 +692,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (startBarsAgo == 0)
             {
                 // Firma con isAutoScale explícito para NT8
-                var frozenLine = Draw.Line(this, lv.TagLineFrozen, false, lv.TickTime, lv.Price, lv.TickTime.AddMilliseconds(1), lv.Price, segBrush, DashStyleHelper.Solid, 2);
-                if (frozenLine != null && frozenLine.Stroke != null)
-                    frozenLine.Stroke.Width = 2;
+                var frozenLineTime = Draw.Line(this, lv.TagLineFrozen, false, lv.TickTime, lv.Price, lv.TickTime.AddMilliseconds(1), lv.Price, segBrush, DashStyleHelper.Solid, 2);
+                if (frozenLineTime != null && frozenLineTime.Stroke != null)
+                    frozenLineTime.Stroke.Width = 2;
                 return;
             }
 
@@ -706,9 +706,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
 
             // Firma con isAutoScale explícito para NT8
-            var frozenLine = Draw.Line(this, lv.TagLineFrozen, false, startBarsAgo, lv.Price, endBarsAgo, lv.Price, segBrush, DashStyleHelper.Solid, 2);
-            if (frozenLine != null && frozenLine.Stroke != null)
-                frozenLine.Stroke.Width = 2;
+            var frozenLineBars = Draw.Line(this, lv.TagLineFrozen, false, startBarsAgo, lv.Price, endBarsAgo, lv.Price, segBrush, DashStyleHelper.Solid, 2);
+            if (frozenLineBars != null && frozenLineBars.Stroke != null)
+                frozenLineBars.Stroke.Width = 2;
         }
 
         private void RemoveDrawObjectSafe(string tag)
