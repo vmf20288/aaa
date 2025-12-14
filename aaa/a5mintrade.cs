@@ -392,7 +392,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 IncludeTickInCluster(side, volume);
 
                 // ¿Alcanzó condiciones para emitir?
-                TryEmitCluster();
+                TryEmitCluster(tickTime);
 
                 // Contexto de lado
                 prevTickPrice = price;
@@ -434,7 +434,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             else if (side == MinTradeSide.Bid) clusterSumBidIncluded += add;
         }
 
-        private void TryEmitCluster()
+        private void TryEmitCluster(DateTime emitTime)
         {
             if (clusterEmitted)
                 return;
@@ -452,7 +452,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             else domSide = prevTickSide; // empate: último lado conocido
 
             long volTotal = (long)Math.Round(clusterSumIncluded, MidpointRounding.AwayFromZero);
-            EmitLevel(clusterStartTime, clusterAnchorPrice, volTotal, domSide);
+
+            // Emitir el nivel en el MOMENTO en que se formó (cuando alcanzó MinTrade)
+            EmitLevel(emitTime, clusterAnchorPrice, volTotal, domSide);
 
             clusterEmitted = true;
         }
@@ -598,52 +600,20 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private void DrawActiveRay(MinTradeLevel lv, Brush brush)
         {
-            int startBarsAgo = GetPrimaryBarsAgo(lv.TickTime);
-            if (startBarsAgo == int.MinValue) return;
+            DateTime t1 = lv.TickTime;
+            DateTime t2 = lv.TickTime.AddMilliseconds(1);
 
-            // --- FIX: si el evento cae en la vela ACTUAL (barsAgo == 0),
-            // usamos el overload por DateTime para NO empujar a la vela anterior.
-            if (startBarsAgo == 0)
-            {
-                DateTime t1 = lv.TickTime;
-                DateTime t2 = lv.TickTime.AddSeconds(1); // solo para dirección del ray
-
-                var rayTime = Draw.Ray(this, lv.TagLineActive, t1, lv.Price, t2, lv.Price, brush);
-                if (rayTime != null && rayTime.Stroke != null)
-                    rayTime.Stroke.Width = 2;
-
-                return;
-            }
-
-            int endBarsAgo = 0;
-
-            var ray = Draw.Ray(this, lv.TagLineActive, startBarsAgo, lv.Price, endBarsAgo, lv.Price, brush);
+            var ray = Draw.Ray(this, lv.TagLineActive, t1, lv.Price, t2, lv.Price, brush);
             if (ray != null && ray.Stroke != null)
                 ray.Stroke.Width = 2;
         }
 
         private void UpdateActiveRayColor(MinTradeLevel lv, Brush brush)
         {
-            int startBarsAgo = GetPrimaryBarsAgo(lv.TickTime);
-            if (startBarsAgo == int.MinValue) return;
+            DateTime t1 = lv.TickTime;
+            DateTime t2 = lv.TickTime.AddMilliseconds(1);
 
-            // --- FIX: si el evento cae en la vela ACTUAL (barsAgo == 0),
-            // usamos el overload por DateTime para NO empujar a la vela anterior.
-            if (startBarsAgo == 0)
-            {
-                DateTime t1 = lv.TickTime;
-                DateTime t2 = lv.TickTime.AddSeconds(1);
-
-                var rayTime = Draw.Ray(this, lv.TagLineActive, t1, lv.Price, t2, lv.Price, brush);
-                if (rayTime != null && rayTime.Stroke != null)
-                    rayTime.Stroke.Width = 2;
-
-                return;
-            }
-
-            int endBarsAgo = 0;
-
-            var ray = Draw.Ray(this, lv.TagLineActive, startBarsAgo, lv.Price, endBarsAgo, lv.Price, brush);
+            var ray = Draw.Ray(this, lv.TagLineActive, t1, lv.Price, t2, lv.Price, brush);
             if (ray != null && ray.Stroke != null)
                 ray.Stroke.Width = 2;
         }
@@ -691,24 +661,17 @@ namespace NinjaTrader.NinjaScript.Indicators
             int startBarsAgo = GetPrimaryBarsAgo(lv.TickTime);
             if (startBarsAgo == int.MinValue) return;
 
-            // --- FIX (consistencia): si el evento cae en la vela ACTUAL (barsAgo == 0),
-            // congelamos usando DateTime para NO empujar a la vela anterior.
+            // OPCIONAL: si se invalida en la misma vela del chart (misma barra primaria),
+            // no dibujamos línea; dejamos solo el texto.
             if (startBarsAgo == 0)
-            {
-                DateTime t1 = lv.TickTime;
-                DateTime t2 = Time[0]; // momento actual del BIP que llama (aquí BIP=1 normalmente)
-
-                if (t2 <= t1)
-                    t2 = t1.AddSeconds(1);
-
-                var lineTime = Draw.Line(this, lv.TagLineFrozen, false, t1, lv.Price, t2, lv.Price, segBrush, DashStyleHelper.Solid, 2);
-                if (lineTime != null && lineTime.Stroke != null)
-                    lineTime.Stroke.Width = 2;
-
                 return;
-            }
 
             int endBarsAgo = 0;
+            if (startBarsAgo <= endBarsAgo)
+            {
+                if (CurrentBars[0] >= 1) startBarsAgo = 1;
+                else return;
+            }
 
             // Firma con isAutoScale explícito para NT8
             var line = Draw.Line(this, lv.TagLineFrozen, false, startBarsAgo, lv.Price, endBarsAgo, lv.Price, segBrush, DashStyleHelper.Solid, 2);
