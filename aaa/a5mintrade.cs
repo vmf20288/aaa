@@ -601,12 +601,21 @@ namespace NinjaTrader.NinjaScript.Indicators
             int startBarsAgo = GetPrimaryBarsAgo(lv.TickTime);
             if (startBarsAgo == int.MinValue) return;
 
-            int endBarsAgo = 0;
-            if (startBarsAgo <= endBarsAgo)
+            // --- FIX: si el evento cae en la vela ACTUAL (barsAgo == 0),
+            // usamos el overload por DateTime para NO empujar a la vela anterior.
+            if (startBarsAgo == 0)
             {
-                if (CurrentBars[0] >= 1) startBarsAgo = 1;
-                else return;
+                DateTime t1 = lv.TickTime;
+                DateTime t2 = lv.TickTime.AddSeconds(1); // solo para dirección del ray
+
+                var rayTime = Draw.Ray(this, lv.TagLineActive, t1, lv.Price, t2, lv.Price, brush);
+                if (rayTime != null && rayTime.Stroke != null)
+                    rayTime.Stroke.Width = 2;
+
+                return;
             }
+
+            int endBarsAgo = 0;
 
             var ray = Draw.Ray(this, lv.TagLineActive, startBarsAgo, lv.Price, endBarsAgo, lv.Price, brush);
             if (ray != null && ray.Stroke != null)
@@ -618,12 +627,21 @@ namespace NinjaTrader.NinjaScript.Indicators
             int startBarsAgo = GetPrimaryBarsAgo(lv.TickTime);
             if (startBarsAgo == int.MinValue) return;
 
-            int endBarsAgo = 0;
-            if (startBarsAgo <= endBarsAgo)
+            // --- FIX: si el evento cae en la vela ACTUAL (barsAgo == 0),
+            // usamos el overload por DateTime para NO empujar a la vela anterior.
+            if (startBarsAgo == 0)
             {
-                if (CurrentBars[0] >= 1) startBarsAgo = 1;
-                else return;
+                DateTime t1 = lv.TickTime;
+                DateTime t2 = lv.TickTime.AddSeconds(1);
+
+                var rayTime = Draw.Ray(this, lv.TagLineActive, t1, lv.Price, t2, lv.Price, brush);
+                if (rayTime != null && rayTime.Stroke != null)
+                    rayTime.Stroke.Width = 2;
+
+                return;
             }
+
+            int endBarsAgo = 0;
 
             var ray = Draw.Ray(this, lv.TagLineActive, startBarsAgo, lv.Price, endBarsAgo, lv.Price, brush);
             if (ray != null && ray.Stroke != null)
@@ -673,12 +691,24 @@ namespace NinjaTrader.NinjaScript.Indicators
             int startBarsAgo = GetPrimaryBarsAgo(lv.TickTime);
             if (startBarsAgo == int.MinValue) return;
 
-            int endBarsAgo = 0;
-            if (startBarsAgo <= endBarsAgo)
+            // --- FIX (consistencia): si el evento cae en la vela ACTUAL (barsAgo == 0),
+            // congelamos usando DateTime para NO empujar a la vela anterior.
+            if (startBarsAgo == 0)
             {
-                if (CurrentBars[0] >= 1) startBarsAgo = 1;
-                else return;
+                DateTime t1 = lv.TickTime;
+                DateTime t2 = Time[0]; // momento actual del BIP que llama (aquí BIP=1 normalmente)
+
+                if (t2 <= t1)
+                    t2 = t1.AddSeconds(1);
+
+                var lineTime = Draw.Line(this, lv.TagLineFrozen, false, t1, lv.Price, t2, lv.Price, segBrush, DashStyleHelper.Solid, 2);
+                if (lineTime != null && lineTime.Stroke != null)
+                    lineTime.Stroke.Width = 2;
+
+                return;
             }
+
+            int endBarsAgo = 0;
 
             // Firma con isAutoScale explícito para NT8
             var line = Draw.Line(this, lv.TagLineFrozen, false, startBarsAgo, lv.Price, endBarsAgo, lv.Price, segBrush, DashStyleHelper.Solid, 2);
@@ -701,18 +731,18 @@ namespace NinjaTrader.NinjaScript.Indicators
 	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
 	{
 		private a5mintrade[] cachea5mintrade;
-		public a5mintrade a5mintrade(int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol)
+		public a5mintrade a5mintrade(int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, bool resetSession, bool showHistory)
 		{
-			return a5mintrade(Input, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol);
+			return a5mintrade(Input, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, resetSession, showHistory);
 		}
 
-		public a5mintrade a5mintrade(ISeries<double> input, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol)
+		public a5mintrade a5mintrade(ISeries<double> input, int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, bool resetSession, bool showHistory)
 		{
 			if (cachea5mintrade != null)
 				for (int idx = 0; idx < cachea5mintrade.Length; idx++)
-					if (cachea5mintrade[idx] != null && cachea5mintrade[idx].MinTrade == minTrade && cachea5mintrade[idx].ToleranciaTicks == toleranciaTicks && cachea5mintrade[idx].ClusterWindowMs == clusterWindowMs && cachea5mintrade[idx].DriftTicks == driftTicks && cachea5mintrade[idx].UseAlMenos == useAlMenos && cachea5mintrade[idx].AlMenosMinTrade == alMenosMinTrade && cachea5mintrade[idx].UseMinPrint == useMinPrint && cachea5mintrade[idx].MinPrintVol == minPrintVol && cachea5mintrade[idx].EqualsInput(input))
+					if (cachea5mintrade[idx] != null && cachea5mintrade[idx].MinTrade == minTrade && cachea5mintrade[idx].ToleranciaTicks == toleranciaTicks && cachea5mintrade[idx].ClusterWindowMs == clusterWindowMs && cachea5mintrade[idx].DriftTicks == driftTicks && cachea5mintrade[idx].UseAlMenos == useAlMenos && cachea5mintrade[idx].AlMenosMinTrade == alMenosMinTrade && cachea5mintrade[idx].UseMinPrint == useMinPrint && cachea5mintrade[idx].MinPrintVol == minPrintVol && cachea5mintrade[idx].ResetSession == resetSession && cachea5mintrade[idx].ShowHistory == showHistory && cachea5mintrade[idx].EqualsInput(input))
 						return cachea5mintrade[idx];
-			return CacheIndicator<a5mintrade>(new a5mintrade(){ MinTrade = minTrade, ToleranciaTicks = toleranciaTicks, ClusterWindowMs = clusterWindowMs, DriftTicks = driftTicks, UseAlMenos = useAlMenos, AlMenosMinTrade = alMenosMinTrade, UseMinPrint = useMinPrint, MinPrintVol = minPrintVol }, input, ref cachea5mintrade);
+			return CacheIndicator<a5mintrade>(new a5mintrade(){ MinTrade = minTrade, ToleranciaTicks = toleranciaTicks, ClusterWindowMs = clusterWindowMs, DriftTicks = driftTicks, UseAlMenos = useAlMenos, AlMenosMinTrade = alMenosMinTrade, UseMinPrint = useMinPrint, MinPrintVol = minPrintVol, ResetSession = resetSession, ShowHistory = showHistory }, input, ref cachea5mintrade);
 		}
 	}
 }
@@ -721,14 +751,14 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
 	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
 	{
-		public Indicators.a5mintrade a5mintrade(int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol)
+		public Indicators.a5mintrade a5mintrade(int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, bool resetSession, bool showHistory)
 		{
-			return indicator.a5mintrade(Input, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol);
+			return indicator.a5mintrade(Input, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, resetSession, showHistory);
 		}
 
-		public Indicators.a5mintrade a5mintrade(ISeries<double> input , int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol)
+		public Indicators.a5mintrade a5mintrade(ISeries<double> input , int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, bool resetSession, bool showHistory)
 		{
-			return indicator.a5mintrade(input, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol);
+			return indicator.a5mintrade(input, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, resetSession, showHistory);
 		}
 	}
 }
@@ -737,14 +767,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
 	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
 	{
-		public Indicators.a5mintrade a5mintrade(int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol)
+		public Indicators.a5mintrade a5mintrade(int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, bool resetSession, bool showHistory)
 		{
-			return indicator.a5mintrade(Input, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol);
+			return indicator.a5mintrade(Input, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, resetSession, showHistory);
 		}
 
-		public Indicators.a5mintrade a5mintrade(ISeries<double> input , int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol)
+		public Indicators.a5mintrade a5mintrade(ISeries<double> input , int minTrade, int toleranciaTicks, int clusterWindowMs, int driftTicks, bool useAlMenos, int alMenosMinTrade, bool useMinPrint, int minPrintVol, bool resetSession, bool showHistory)
 		{
-			return indicator.a5mintrade(input, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol);
+			return indicator.a5mintrade(input, minTrade, toleranciaTicks, clusterWindowMs, driftTicks, useAlMenos, alMenosMinTrade, useMinPrint, minPrintVol, resetSession, showHistory);
 		}
 	}
 }
