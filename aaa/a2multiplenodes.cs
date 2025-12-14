@@ -52,7 +52,7 @@ namespace NinjaTrader.NinjaScript
 {
     // Enums en el namespace padre para que el diseñador de propiedades las resuelva sin problemas
     public enum LinePriceMode { Average, Midpoint }
-    public enum CloseSource { Primary, OneMinute, ThirtySeconds }
+    public enum CloseSource { Primary, OneMinute }   // <-- removido ThirtySeconds
 }
 
 namespace NinjaTrader.NinjaScript.Indicators
@@ -136,7 +136,6 @@ namespace NinjaTrader.NinjaScript.Indicators
         #region State / fields
         private int bipVol = -1;          // Volumétrico X min
         private int bipOneMinute = -1;    // 1m
-        private int bipThirtySec = -1;    // 30s
 
         private double tickSize;
         private readonly List<Level> activeLevels = new List<Level>();
@@ -182,12 +181,11 @@ namespace NinjaTrader.NinjaScript.Indicators
                 AddVolumetric(Instrument.FullName, BarsPeriodType.Minute, VelasTimeFrameMin, VolumetricDeltaType.BidAsk, 1);
                 bipVol = 1;
 
-                // Series auxiliares de cierre
+                // Serie auxiliar de cierre 1m
                 AddDataSeries(BarsPeriodType.Minute, 1);
                 bipOneMinute = 2;
 
-                AddDataSeries(BarsPeriodType.Second, 30);
-                bipThirtySec = 3;
+                // (REMOVIDO) AddDataSeries(BarsPeriodType.Second, 30);
             }
             else if (State == State.DataLoaded)
             {
@@ -201,7 +199,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         #region OnBarUpdate
         protected override void OnBarUpdate()
         {
-            if (bipVol < 0 || bipOneMinute < 0 || bipThirtySec < 0)
+            if (bipVol < 0 || bipOneMinute < 0)
                 return;
 
             // --- 1) Serie Volumétrica Xmin: detectar clusters POC
@@ -314,23 +312,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                     }
                 }
             }
-            // --- 3) Serie 30s: borrado por cierre=30s (no aplica en v6 por estar fijado OneMinute, pero se deja por compatibilidad)
-            else if (BarsInProgress == bipThirtySec)
-            {
-                if (!BorrarSoloSiCierre || CierreParaBorrar != NinjaTrader.NinjaScript.CloseSource.ThirtySeconds || CurrentBar < 1)
-                    return;
-
-                if (IsFirstTickOfBar)
-                {
-                    double c1 = Closes[bipThirtySec][1];
-                    double c2 = (CurrentBars[bipThirtySec] > 1) ? Closes[bipThirtySec][2] : c1;
-
-                    foreach (var lvl in activeLevels.Where(x => x.Active).ToList())
-                        if (CloseTouchesOrCrosses(c1, c2, lvl.Price))
-                            InvalidateLevel(lvl, Times[bipThirtySec][1]);
-                }
-            }
-            // --- 4) Serie primaria: limpieza de sesión y borrado por toque (o por cierre=primario)
+            // --- 3) Serie primaria: limpieza de sesión y borrado por toque (o por cierre=primario)
             else if (BarsInProgress == 0)
             {
                 if (CurrentBar < 0)
@@ -579,55 +561,55 @@ namespace NinjaTrader.NinjaScript.Indicators
 
 namespace NinjaTrader.NinjaScript.Indicators
 {
-    public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
-    {
-        private a2multiplenodes[] cachea2multiplenodes;
-        public a2multiplenodes a2multiplenodes(int velasTimeFrameMin, int ventanaMin, int ticksAlrededor, int toleranciaTicks, bool restartSession)
-        {
-            return a2multiplenodes(Input, velasTimeFrameMin, ventanaMin, ticksAlrededor, toleranciaTicks, restartSession);
-        }
+	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
+	{
+		private a2multiplenodes[] cachea2multiplenodes;
+		public a2multiplenodes a2multiplenodes(int velasTimeFrameMin, int ventanaMin, int ticksAlrededor, int toleranciaTicks, Brush colorLinea, bool showHistory, bool restartSession)
+		{
+			return a2multiplenodes(Input, velasTimeFrameMin, ventanaMin, ticksAlrededor, toleranciaTicks, colorLinea, showHistory, restartSession);
+		}
 
-        public a2multiplenodes a2multiplenodes(ISeries<double> input, int velasTimeFrameMin, int ventanaMin, int ticksAlrededor, int toleranciaTicks, bool restartSession)
-        {
-            if (cachea2multiplenodes != null)
-                for (int idx = 0; idx < cachea2multiplenodes.Length; idx++)
-                    if (cachea2multiplenodes[idx] != null && cachea2multiplenodes[idx].VelasTimeFrameMin == velasTimeFrameMin && cachea2multiplenodes[idx].VentanaMin == ventanaMin && cachea2multiplenodes[idx].TicksAlrededor == ticksAlrededor && cachea2multiplenodes[idx].ToleranciaTicks == toleranciaTicks && cachea2multiplenodes[idx].RestartSession == restartSession && cachea2multiplenodes[idx].EqualsInput(input))
-                        return cachea2multiplenodes[idx];
-            return CacheIndicator<a2multiplenodes>(new a2multiplenodes(){ VelasTimeFrameMin = velasTimeFrameMin, VentanaMin = ventanaMin, TicksAlrededor = ticksAlrededor, ToleranciaTicks = toleranciaTicks, RestartSession = restartSession }, input, ref cachea2multiplenodes);
-        }
-    }
+		public a2multiplenodes a2multiplenodes(ISeries<double> input, int velasTimeFrameMin, int ventanaMin, int ticksAlrededor, int toleranciaTicks, Brush colorLinea, bool showHistory, bool restartSession)
+		{
+			if (cachea2multiplenodes != null)
+				for (int idx = 0; idx < cachea2multiplenodes.Length; idx++)
+					if (cachea2multiplenodes[idx] != null && cachea2multiplenodes[idx].VelasTimeFrameMin == velasTimeFrameMin && cachea2multiplenodes[idx].VentanaMin == ventanaMin && cachea2multiplenodes[idx].TicksAlrededor == ticksAlrededor && cachea2multiplenodes[idx].ToleranciaTicks == toleranciaTicks && cachea2multiplenodes[idx].ColorLinea == colorLinea && cachea2multiplenodes[idx].ShowHistory == showHistory && cachea2multiplenodes[idx].RestartSession == restartSession && cachea2multiplenodes[idx].EqualsInput(input))
+						return cachea2multiplenodes[idx];
+			return CacheIndicator<a2multiplenodes>(new a2multiplenodes(){ VelasTimeFrameMin = velasTimeFrameMin, VentanaMin = ventanaMin, TicksAlrededor = ticksAlrededor, ToleranciaTicks = toleranciaTicks, ColorLinea = colorLinea, ShowHistory = showHistory, RestartSession = restartSession }, input, ref cachea2multiplenodes);
+		}
+	}
 }
 
 namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
-    public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
-    {
-        public Indicators.a2multiplenodes a2multiplenodes(int velasTimeFrameMin, int ventanaMin, int ticksAlrededor, int toleranciaTicks, bool restartSession)
-        {
-            return indicator.a2multiplenodes(Input, velasTimeFrameMin, ventanaMin, ticksAlrededor, toleranciaTicks, restartSession);
-        }
+	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
+	{
+		public Indicators.a2multiplenodes a2multiplenodes(int velasTimeFrameMin, int ventanaMin, int ticksAlrededor, int toleranciaTicks, Brush colorLinea, bool showHistory, bool restartSession)
+		{
+			return indicator.a2multiplenodes(Input, velasTimeFrameMin, ventanaMin, ticksAlrededor, toleranciaTicks, colorLinea, showHistory, restartSession);
+		}
 
-        public Indicators.a2multiplenodes a2multiplenodes(ISeries<double> input , int velasTimeFrameMin, int ventanaMin, int ticksAlrededor, int toleranciaTicks, bool restartSession)
-        {
-            return indicator.a2multiplenodes(input, velasTimeFrameMin, ventanaMin, ticksAlrededor, toleranciaTicks, restartSession);
-        }
-    }
+		public Indicators.a2multiplenodes a2multiplenodes(ISeries<double> input , int velasTimeFrameMin, int ventanaMin, int ticksAlrededor, int toleranciaTicks, Brush colorLinea, bool showHistory, bool restartSession)
+		{
+			return indicator.a2multiplenodes(input, velasTimeFrameMin, ventanaMin, ticksAlrededor, toleranciaTicks, colorLinea, showHistory, restartSession);
+		}
+	}
 }
 
 namespace NinjaTrader.NinjaScript.Strategies
 {
-    public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
-    {
-        public Indicators.a2multiplenodes a2multiplenodes(int velasTimeFrameMin, int ventanaMin, int ticksAlrededor, int toleranciaTicks, bool restartSession)
-        {
-            return indicator.a2multiplenodes(Input, velasTimeFrameMin, ventanaMin, ticksAlrededor, toleranciaTicks, restartSession);
-        }
+	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
+	{
+		public Indicators.a2multiplenodes a2multiplenodes(int velasTimeFrameMin, int ventanaMin, int ticksAlrededor, int toleranciaTicks, Brush colorLinea, bool showHistory, bool restartSession)
+		{
+			return indicator.a2multiplenodes(Input, velasTimeFrameMin, ventanaMin, ticksAlrededor, toleranciaTicks, colorLinea, showHistory, restartSession);
+		}
 
-        public Indicators.a2multiplenodes a2multiplenodes(ISeries<double> input , int velasTimeFrameMin, int ventanaMin, int ticksAlrededor, int toleranciaTicks, bool restartSession)
-        {
-            return indicator.a2multiplenodes(input, velasTimeFrameMin, ventanaMin, ticksAlrededor, toleranciaTicks, restartSession);
-        }
-    }
+		public Indicators.a2multiplenodes a2multiplenodes(ISeries<double> input , int velasTimeFrameMin, int ventanaMin, int ticksAlrededor, int toleranciaTicks, Brush colorLinea, bool showHistory, bool restartSession)
+		{
+			return indicator.a2multiplenodes(input, velasTimeFrameMin, ventanaMin, ticksAlrededor, toleranciaTicks, colorLinea, showHistory, restartSession);
+		}
+	}
 }
 
 #endregion
