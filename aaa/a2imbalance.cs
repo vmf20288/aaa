@@ -315,28 +315,26 @@ namespace NinjaTrader.NinjaScript.Indicators
             foreach (var oldTag in toRemoveSameStack)
                 RemoveStackLine(oldTag);
 
-            int startBarsAgo = BarsAgoOnPrimary(barTime);
-            int endBarsAgo = 0; // extender hacia la derecha
+            // --- FIX MINIMO: Ray por DateTime (no barsAgo) para que NO se vaya 1 vela atrás ---
+            int startBarsAgo = BarsAgoOnPrimary(barTime); // para el texto (puede ser 0 sin problema)
 
-            // HOTFIX horizontal: si ambos anclajes caen en el mismo bar (startBarsAgo <= 0), fuerza 1 bar a la izquierda
-            if (startBarsAgo <= endBarsAgo)
-            {
-                if (CurrentBars[0] >= 1)
-                    startBarsAgo = 1;
-                else
-                    return;
-            }
+            DateTime startTime = barTime;
+            DateTime endTime = barTime.AddMinutes(TimeFrameVelas);   // siguiente vela -> dirección a la derecha
+            if (endTime <= startTime)
+                endTime = startTime.AddSeconds(1); // seguridad
+            // ---------------------------------------------------------------------------------
 
             Brush brush = isAskSide ? Brushes.LimeGreen : Brushes.Red;
 
-            // Re-dibujo (crear o actualizar el mismo tag) — dos puntos con la MISMA Y => HORIZONTAL
-            var ray = Draw.Ray(this, tagRay, startBarsAgo, midPrice, endBarsAgo, midPrice, brush);
+            // Re-dibujo (crear o actualizar el mismo tag) — HORIZONTAL
+            var ray = Draw.Ray(this, tagRay, startTime, midPrice, endTime, midPrice, brush);
             if (ray != null && ray.Stroke != null)
             {
                 ray.Stroke.Width = 2;
                 ray.Stroke.DashStyleHelper = NinjaTrader.Gui.DashStyleHelper.Dash;
             }
 
+            // Texto: se mantiene igual (barsAgo), pero ahora YA NO se mueve a 1 barra atrás
             Draw.Text(this, tagText, "IM", startBarsAgo, midPrice, brush);
 
             // Memoria/estado del stack
@@ -527,66 +525,58 @@ namespace NinjaTrader.NinjaScript.Indicators
 }
 
 #region NinjaScript generated code. Neither change nor remove.
+
 namespace NinjaTrader.NinjaScript.Indicators
 {
-    public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
-    {
-        private a2imbalance[] cachea2imbalance;
+	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
+	{
+		private a2imbalance[] cachea2imbalance;
+		public a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, bool sessionReset, bool showHistory)
+		{
+			return a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, sessionReset, showHistory);
+		}
 
-        public a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia)
-        {
-            return a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia);
-        }
-
-        public a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia)
-        {
-            if (cachea2imbalance != null)
-                for (int idx = 0; idx < cachea2imbalance.Length; idx++)
-                    if (cachea2imbalance[idx] != null && cachea2imbalance[idx].TimeFrameVelas == timeFrameVelas && cachea2imbalance[idx].StackImbalance == stackImbalance && cachea2imbalance[idx].ImbalanceRatio == imbalanceRatio && cachea2imbalance[idx].MinDeltaImbalance == minDeltaImbalance && cachea2imbalance[idx].ToleranciaBorrarTicks == toleranciaBorrarTicks && cachea2imbalance[idx].FiltroSupervivencia == filtroSupervivencia && cachea2imbalance[idx].EqualsInput(input))
-                        return cachea2imbalance[idx];
-
-            return CacheIndicator<a2imbalance>(new a2imbalance()
-            {
-                TimeFrameVelas = timeFrameVelas,
-                StackImbalance = stackImbalance,
-                ImbalanceRatio = imbalanceRatio,
-                MinDeltaImbalance = minDeltaImbalance,
-                ToleranciaBorrarTicks = toleranciaBorrarTicks,
-                FiltroSupervivencia = filtroSupervivencia
-            }, input, ref cachea2imbalance);
-        }
-    }
+		public a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, bool sessionReset, bool showHistory)
+		{
+			if (cachea2imbalance != null)
+				for (int idx = 0; idx < cachea2imbalance.Length; idx++)
+					if (cachea2imbalance[idx] != null && cachea2imbalance[idx].TimeFrameVelas == timeFrameVelas && cachea2imbalance[idx].StackImbalance == stackImbalance && cachea2imbalance[idx].ImbalanceRatio == imbalanceRatio && cachea2imbalance[idx].MinDeltaImbalance == minDeltaImbalance && cachea2imbalance[idx].ToleranciaBorrarTicks == toleranciaBorrarTicks && cachea2imbalance[idx].FiltroSupervivencia == filtroSupervivencia && cachea2imbalance[idx].SessionReset == sessionReset && cachea2imbalance[idx].ShowHistory == showHistory && cachea2imbalance[idx].EqualsInput(input))
+						return cachea2imbalance[idx];
+			return CacheIndicator<a2imbalance>(new a2imbalance(){ TimeFrameVelas = timeFrameVelas, StackImbalance = stackImbalance, ImbalanceRatio = imbalanceRatio, MinDeltaImbalance = minDeltaImbalance, ToleranciaBorrarTicks = toleranciaBorrarTicks, FiltroSupervivencia = filtroSupervivencia, SessionReset = sessionReset, ShowHistory = showHistory }, input, ref cachea2imbalance);
+		}
+	}
 }
 
 namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
-    public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
-    {
-        public Indicators.a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia)
-        {
-            return indicator.a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia);
-        }
+	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
+	{
+		public Indicators.a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, bool sessionReset, bool showHistory)
+		{
+			return indicator.a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, sessionReset, showHistory);
+		}
 
-        public Indicators.a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia)
-        {
-            return indicator.a2imbalance(input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia);
-        }
-    }
+		public Indicators.a2imbalance a2imbalance(ISeries<double> input , int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, bool sessionReset, bool showHistory)
+		{
+			return indicator.a2imbalance(input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, sessionReset, showHistory);
+		}
+	}
 }
 
 namespace NinjaTrader.NinjaScript.Strategies
 {
-    public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
-    {
-        public Indicators.a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia)
-        {
-            return indicator.a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia);
-        }
+	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
+	{
+		public Indicators.a2imbalance a2imbalance(int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, bool sessionReset, bool showHistory)
+		{
+			return indicator.a2imbalance(Input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, sessionReset, showHistory);
+		}
 
-        public Indicators.a2imbalance a2imbalance(ISeries<double> input, int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia)
-        {
-            return indicator.a2imbalance(input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia);
-        }
-    }
+		public Indicators.a2imbalance a2imbalance(ISeries<double> input , int timeFrameVelas, int stackImbalance, double imbalanceRatio, int minDeltaImbalance, int toleranciaBorrarTicks, bool filtroSupervivencia, bool sessionReset, bool showHistory)
+		{
+			return indicator.a2imbalance(input, timeFrameVelas, stackImbalance, imbalanceRatio, minDeltaImbalance, toleranciaBorrarTicks, filtroSupervivencia, sessionReset, showHistory);
+		}
+	}
 }
+
 #endregion
