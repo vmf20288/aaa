@@ -3,8 +3,9 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using System.Linq;
-using System.Windows.Media;
+using System.Windows.Media; // Brush / Brushes
 using SharpDX;
 using SharpDX.DirectWrite;
 using D2D1 = SharpDX.Direct2D1;
@@ -43,6 +44,15 @@ namespace NinjaTrader.NinjaScript.Indicators
         private readonly Dictionary<int, int> orderLimitSignalsByBar = new Dictionary<int, int>();
         private readonly Dictionary<int, int> absorptionSignalsByBar = new Dictionary<int, int>();
         private readonly Dictionary<int, int> divergenceSignalsByBar = new Dictionary<int, int>();
+
+        // --- NUEVO: filas inferiores Vol / Δ / CΔ (5m volumetric internal)
+        private readonly Dictionary<int, long> volTotalByBar = new Dictionary<int, long>();
+        private readonly Dictionary<int, long> deltaByBar = new Dictionary<int, long>();
+        private readonly Dictionary<int, long> cumDeltaByBar = new Dictionary<int, long>();
+
+        private long cumDeltaRunningVol = 0;
+        private DateTime cumDeltaTradingDay = DateTime.MinValue;
+        private static readonly TimeSpan CumDeltaResetTime = new TimeSpan(4, 0, 0);
         #endregion
 
         #region OnStateChange
@@ -168,6 +178,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (volBarIndex < 0)
                 return;
 
+            // NUEVO: actualizar Vol/Δ/CΔ del bar cerrado (independiente de señales)
+            UpdateVolDeltaRows(volBarIndex, volBarTime, true);
+
             if (!TryGetMaxVolumes(volBarIndex, out long maxBid, out double maxBidPrice, out long maxAsk, out double maxAskPrice))
                 return;
 
@@ -191,6 +204,9 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             if (volBarIndex < 0)
                 return;
+
+            // NUEVO: actualizar Vol/Δ/CΔ del bar vivo (intrabar)
+            UpdateVolDeltaRows(volBarIndex, volBarTime, false);
 
             if (!TryGetMaxVolumes(volBarIndex, out long maxBid, out double maxBidPrice, out long maxAsk, out double maxAskPrice))
                 return;
@@ -403,7 +419,114 @@ namespace NinjaTrader.NinjaScript.Indicators
             absorptionSignalsByBar.Clear();
             divergenceSignalsByBar.Clear();
             cumDeltaDiv.Clear();
+
+            // NUEVO: limpiar filas Vol/Δ/CΔ
+            volTotalByBar.Clear();
+            deltaByBar.Clear();
+            cumDeltaByBar.Clear();
+            cumDeltaRunningVol = 0;
+            cumDeltaTradingDay = DateTime.MinValue;
+
             RemoveDrawObjects();
+        }
+        #endregion
+
+        #region Vol/Delta/CumDelta helpers (5m series)
+        private DateTime GetCumDeltaTradingDay(DateTime barTime)
+        {
+            // Reset a las 4:00 (según la hora del gráfico)
+            return (barTime.TimeOfDay < CumDeltaResetTime) ? barTime.Date.AddDays(-1) : barTime.Date;
+        }
+
+        private void EnsureCumDeltaSession(DateTime barTime)
+        {
+            DateTime day = GetCumDeltaTradingDay(barTime);
+            if (cumDeltaTradingDay != day)
+            {
+                cumDeltaTradingDay = day;
+                cumDeltaRunningVol = 0;
+            }
+        }
+
+        private void UpdateVolDeltaRows(int volBarIndex, DateTime volBarTime, bool isClosedBar)
+        {
+            if (volBarsType == null || volBip < 0)
+                return;
+
+            if (volBarIndex < 0 || volBarIndex >= BarsArray[volBip].Count)
+                return;
+
+            // Reset 4:00
+            EnsureCumDeltaSession(volBarTime);
+
+            // Total Volume (de la serie Volumes[])
+            long totalVol = 0;
+            int barsAgo = CurrentBars[volBip] - volBarIndex;
+            if (barsAgo >= 0 && barsAgo < BarsArray[volBip].Count)
+            {
+                double v = Volumes[volBip][barsAgo];
+                totalVol = (long)Math.Round(v, MidpointRounding.AwayFromZero);
+            }
+
+            // Bar Delta (Order Flow Volumetric)
+            long barDelta;
+            try
+            {
+                barDelta = volBarsType.Volumes[volBarIndex].BarDelta;
+            }
+            catch
+            {
+                // Si por alguna razón la propiedad no está accesible en tu build, no romper el indicador.
+                return;
+            }
+
+            long barCumDelta;
+            if (isClosedBar)
+            {
+                cumDeltaRunningVol += barDelta;
+                barCumDelta = cumDeltaRunningVol;
+            }
+            else
+            {
+                barCumDelta = cumDeltaRunningVol + barDelta;
+            }
+
+            // Mapear al bar primario (chart)
+            int primaryBar = BarsArray[0].GetBar(volBarTime);
+            if (primaryBar < 0 || primaryBar > CurrentBars[0])
+                return;
+
+            volTotalByBar[primaryBar] = totalVol;
+            deltaByBar[primaryBar] = barDelta;
+            cumDeltaByBar[primaryBar] = barCumDelta;
+        }
+
+        private static string FormatDeltaRounded(long delta)
+        {
+            // Δ: redondear a 50 y mostrar en centenas con .0 / .5
+            // Ej: -310 -> -3.0 ; -325 -> -3.5 ; 90 -> 1.0 (según redondeo)
+            double rounded = Math.Round(delta / 50.0, 0, MidpointRounding.AwayFromZero) * 50.0;
+            double scaled = rounded / 100.0;
+
+            if (Math.Abs(scaled) < 1e-9)
+                return "0";
+
+            return scaled.ToString("0.0", CultureInfo.InvariantCulture);
+        }
+
+        private static string FormatVolumeK(long volume)
+        {
+            // Vol: miles sin decimal con "k" y redondeado
+            long k = (long)Math.Round(volume / 1000.0, 0, MidpointRounding.AwayFromZero);
+            return k.ToString("0", CultureInfo.InvariantCulture) + "k";
+        }
+
+        private static string FormatCumDeltaK(long cumDelta)
+        {
+            // CΔ: miles con 1 decimal y "k" (ej 1.5k, -0.5k, 0.1k)
+            double k = cumDelta / 1000.0;
+            k = Math.Round(k, 1, MidpointRounding.AwayFromZero);
+            return k.ToString("0.0", CultureInfo.InvariantCulture) + "k";
         }
         #endregion
 
@@ -517,7 +640,10 @@ namespace NinjaTrader.NinjaScript.Indicators
             float rowHeight = 18f;
             float topMargin = 4f;
             float bottomMargin = 2f;
-            float totalHeight = rowHeight * 4f + topMargin + bottomMargin;
+
+            // 4 filas originales + 3 nuevas (VOL/Δ/CΔ)
+            int totalRows = 7;
+            float totalHeight = rowHeight * totalRows + topMargin + bottomMargin;
 
             float bottom = panel.Y + panel.H;
             float top = bottom - totalHeight;
@@ -531,16 +657,27 @@ namespace NinjaTrader.NinjaScript.Indicators
             using (var bgBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(10, 10, 10, 200)))
             using (var gridBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(200, 200, 200, 120)))
             using (var textBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(200, 200, 200, 180)))
+            using (var volTextBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(170, 170, 170, 180)))
+            using (var deltaPosBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(60, 200, 120, 190)))
+            using (var deltaNegBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(220, 80, 80, 190)))
+            using (var cumPosBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(60, 180, 110, 120)))
+            using (var cumNegBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(200, 70, 70, 120)))
             using (var textFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 12f))
+            using (var valueFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 12f))
             {
+                // Centrar valores en su celda (ancho = centro-a-centro)
+                valueFormat.TextAlignment = TextAlignment.Center;
+                valueFormat.ParagraphAlignment = ParagraphAlignment.Center;
+
                 rt.FillRectangle(backgroundRect, bgBrush);
 
                 float firstLineY = top + topMargin;
                 float lastLineY = bottom - bottomMargin;
 
+                // Bordes y separadores horizontales
                 rt.DrawLine(new SharpDX.Vector2(panel.X, firstLineY), new SharpDX.Vector2(panel.X + panel.W, firstLineY), gridBrush, 1f);
 
-                for (int i = 1; i < 4; i++)
+                for (int i = 1; i < totalRows; i++)
                 {
                     float y = firstLineY + rowHeight * i;
                     rt.DrawLine(new SharpDX.Vector2(panel.X, y), new SharpDX.Vector2(panel.X + panel.W, y), gridBrush, 1f);
@@ -548,78 +685,112 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 rt.DrawLine(new SharpDX.Vector2(panel.X, lastLineY), new SharpDX.Vector2(panel.X + panel.W, lastLineY), gridBrush, 1f);
 
-                SharpDX.RectangleF orderLimitRect = new SharpDX.RectangleF(panel.X, firstLineY, panel.W, rowHeight);
-                string orderLimitLabel = "Order Limit";
-                using (var layout = new TextLayout(Core.Globals.DirectWriteFactory, orderLimitLabel, textFormat, orderLimitRect.Width, rowHeight))
+                // Labels derecha (igual estilo que antes)
+                void DrawRightLabel(string label, float rowTopY)
                 {
-                    float textX = panel.X + panel.W - layout.Metrics.Width - 6f;
-                    float textY = firstLineY + (rowHeight - layout.Metrics.Height) / 2f;
-                    rt.DrawTextLayout(new SharpDX.Vector2(textX, textY), layout, textBrush);
+                    SharpDX.RectangleF r = new SharpDX.RectangleF(panel.X, rowTopY, panel.W, rowHeight);
+                    using (var layout = new TextLayout(Core.Globals.DirectWriteFactory, label, textFormat, r.Width, rowHeight))
+                    {
+                        float textX = panel.X + panel.W - layout.Metrics.Width - 6f;
+                        float textY = rowTopY + (rowHeight - layout.Metrics.Height) / 2f;
+                        rt.DrawTextLayout(new SharpDX.Vector2(textX, textY), layout, textBrush);
+                    }
                 }
 
-                SharpDX.RectangleF absorptionRect = new SharpDX.RectangleF(panel.X, firstLineY + rowHeight, panel.W, rowHeight);
-                string absorptionLabel = "Absorption";
-                using (var layout = new TextLayout(Core.Globals.DirectWriteFactory, absorptionLabel, textFormat, absorptionRect.Width, rowHeight))
-                {
-                    float textX = panel.X + panel.W - layout.Metrics.Width - 6f;
-                    float textY = absorptionRect.Y + (rowHeight - layout.Metrics.Height) / 2f;
-                    rt.DrawTextLayout(new SharpDX.Vector2(textX, textY), layout, textBrush);
-                }
-
-                SharpDX.RectangleF divergenceRect = new SharpDX.RectangleF(panel.X, firstLineY + rowHeight * 3f, panel.W, rowHeight);
-                string divergenceLabel = "Divergence";
-                using (var layout = new TextLayout(Core.Globals.DirectWriteFactory, divergenceLabel, textFormat, divergenceRect.Width, rowHeight))
-                {
-                    float textX = panel.X + panel.W - layout.Metrics.Width - 6f;
-                    float textY = divergenceRect.Y + (rowHeight - layout.Metrics.Height) / 2f;
-                    rt.DrawTextLayout(new SharpDX.Vector2(textX, textY), layout, textBrush);
-                }
+                // Row 1
+                DrawRightLabel("Order Limit", firstLineY + rowHeight * 0f);
+                // Row 2
+                DrawRightLabel("Absorption", firstLineY + rowHeight * 1f);
+                // Row 3 se deja vacía (NO tocar)
+                // Row 4
+                DrawRightLabel("Divergence", firstLineY + rowHeight * 3f);
+                // Row 5..7 nuevas
+                DrawRightLabel("Volume", firstLineY + rowHeight * 4f);
+                DrawRightLabel("Delta", firstLineY + rowHeight * 5f);
+                DrawRightLabel("Cum delta", firstLineY + rowHeight * 6f);
 
                 int startBar = Math.Max(ChartBars.FromIndex, 0);
                 int endBar = Math.Min(ChartBars.ToIndex, Bars.Count - 1);
 
                 float triangleSize = 5f;
-                float row1Middle = firstLineY + rowHeight / 2f;
-                float row2Top = firstLineY + rowHeight * 1f;
-                float row2Middle = row2Top + rowHeight / 2f;
-                float row4Top = firstLineY + rowHeight * 3f;
-                float row4Middle = row4Top + rowHeight / 2f;
+                float row1Middle = firstLineY + rowHeight * 0.5f;
+                float row2Middle = firstLineY + rowHeight * 1.5f;
+                float row4Middle = firstLineY + rowHeight * 3.5f;
+
+                // Rects de valores (topY por fila)
+                float rowVolTop = firstLineY + rowHeight * 4f;
+                float rowDelTop = firstLineY + rowHeight * 5f;
+                float rowCumTop = firstLineY + rowHeight * 6f;
 
                 for (int barIndex = startBar; barIndex <= endBar; barIndex++)
                 {
-                    if (!orderLimitSignalsByBar.TryGetValue(barIndex, out int side))
-                        continue;
-
                     float x = (float)chartControl.GetXByBarIndex(ChartBars, barIndex);
-                    bool isBidSide = side > 0;
-                    SharpDX.Color color = isBidSide ? new SharpDX.Color(34, 139, 34) : new SharpDX.Color(255, 102, 0);
 
-                    DrawTriangle(rt, x, row1Middle, triangleSize, isBidSide, color);
-                }
+                    // --- Triángulos existentes (sin cambios)
+                    if (orderLimitSignalsByBar.TryGetValue(barIndex, out int olSide))
+                    {
+                        bool isBidSide = olSide > 0;
+                        SharpDX.Color color = isBidSide ? new SharpDX.Color(34, 139, 34) : new SharpDX.Color(255, 102, 0);
+                        DrawTriangle(rt, x, row1Middle, triangleSize, isBidSide, color);
+                    }
 
-                for (int barIndex = startBar; barIndex <= endBar; barIndex++)
-                {
-                    if (!absorptionSignalsByBar.TryGetValue(barIndex, out int side))
-                        continue;
+                    if (absorptionSignalsByBar.TryGetValue(barIndex, out int absSide))
+                    {
+                        bool pointingUp = absSide < 0;
+                        SharpDX.Color color = absSide > 0 ? new SharpDX.Color(255, 102, 0) : new SharpDX.Color(34, 139, 34);
+                        DrawTriangle(rt, x, row2Middle, triangleSize, pointingUp, color);
+                    }
 
-                    float x = (float)chartControl.GetXByBarIndex(ChartBars, barIndex);
-                    bool isBidSideAbs = side < 0;
-                    bool pointingUp = isBidSideAbs;
-                    SharpDX.Color color = side > 0 ? new SharpDX.Color(255, 102, 0) : new SharpDX.Color(34, 139, 34);
+                    if (divergenceSignalsByBar.TryGetValue(barIndex, out int divSide))
+                    {
+                        bool pointingUp = divSide > 0;
+                        SharpDX.Color color = divSide > 0 ? new SharpDX.Color(34, 139, 34) : new SharpDX.Color(255, 102, 0);
+                        DrawTriangle(rt, x, row4Middle, triangleSize, pointingUp, color);
+                    }
 
-                    DrawTriangle(rt, x, row2Middle, triangleSize, pointingUp, color);
-                }
+                    // --- Ancho (centro a centro)
+                    float halfWidth = 6f;
+                    if (barIndex < endBar)
+                    {
+                        float xNext = (float)chartControl.GetXByBarIndex(ChartBars, barIndex + 1);
+                        halfWidth = Math.Max(2f, (xNext - x) * 0.5f);
+                    }
+                    else if (barIndex > startBar)
+                    {
+                        float xPrev = (float)chartControl.GetXByBarIndex(ChartBars, barIndex - 1);
+                        halfWidth = Math.Max(2f, (x - xPrev) * 0.5f);
+                    }
 
-                for (int barIndex = startBar; barIndex <= endBar; barIndex++)
-                {
-                    if (!divergenceSignalsByBar.TryGetValue(barIndex, out int side))
-                        continue;
+                    float cellW = halfWidth * 2f;
+                    float cellX = x - halfWidth;
 
-                    float x = (float)chartControl.GetXByBarIndex(ChartBars, barIndex);
-                    bool pointingUp = side > 0;
-                    SharpDX.Color color = side > 0 ? new SharpDX.Color(34, 139, 34) : new SharpDX.Color(255, 102, 0);
+                    // --- VOL / Δ / CΔ (texto)
+                    if (volTotalByBar.TryGetValue(barIndex, out long vTotal))
+                    {
+                        string txt = FormatVolumeK(vTotal);
+                        var rect = new SharpDX.RectangleF(cellX, rowVolTop, cellW, rowHeight);
+                        rt.DrawText(txt, valueFormat, rect, volTextBrush);
+                    }
 
-                    DrawTriangle(rt, x, row4Middle, triangleSize, pointingUp, color);
+                    if (deltaByBar.TryGetValue(barIndex, out long dBar))
+                    {
+                        string txt = FormatDeltaRounded(dBar);
+                        var rect = new SharpDX.RectangleF(cellX, rowDelTop, cellW, rowHeight);
+
+                        if (dBar > 0) rt.DrawText(txt, valueFormat, rect, deltaPosBrush);
+                        else if (dBar < 0) rt.DrawText(txt, valueFormat, rect, deltaNegBrush);
+                        else rt.DrawText(txt, valueFormat, rect, textBrush);
+                    }
+
+                    if (cumDeltaByBar.TryGetValue(barIndex, out long cdBar))
+                    {
+                        string txt = FormatCumDeltaK(cdBar);
+                        var rect = new SharpDX.RectangleF(cellX, rowCumTop, cellW, rowHeight);
+
+                        if (cdBar > 0) rt.DrawText(txt, valueFormat, rect, cumPosBrush);
+                        else if (cdBar < 0) rt.DrawText(txt, valueFormat, rect, cumNegBrush);
+                        else rt.DrawText(txt, valueFormat, rect, volTextBrush);
+                    }
                 }
             }
         }
