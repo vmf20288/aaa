@@ -215,36 +215,17 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (barsAgo < 0 || barsAgo >= BarsArray[volBip].Count)
                 return false;
 
-            double low = Lows[volBip][barsAgo];
-            double high = Highs[volBip][barsAgo];
+            double tmpAskPrice;
+            double tmpBidPrice;
 
-            if (high < low)
-            {
-                double t = high;
-                high = low;
-                low = t;
-            }
+            maxAsk = volBarsType.Volumes[volBarIndex].GetMaximumVolume(true, out tmpAskPrice);
+            maxBid = volBarsType.Volumes[volBarIndex].GetMaximumVolume(false, out tmpBidPrice);
 
-            int priceLevels = Math.Max(1, (int)Math.Round((high - low) / volTickSize)) + 1;
+            if (maxAsk > 0)
+                maxAskPrice = Instrument.MasterInstrument.RoundToTickSize(tmpAskPrice);
 
-            for (int level = 0; level < priceLevels; level++)
-            {
-                double price = Instrument.MasterInstrument.RoundToTickSize(low + level * volTickSize);
-                long bidVol = volBarsType.Volumes[volBarIndex].GetBidVolumeForPrice(price);
-                long askVol = volBarsType.Volumes[volBarIndex].GetAskVolumeForPrice(price);
-
-                if (bidVol > maxBid)
-                {
-                    maxBid = bidVol;
-                    maxBidPrice = price;
-                }
-
-                if (askVol > maxAsk)
-                {
-                    maxAsk = askVol;
-                    maxAskPrice = price;
-                }
-            }
+            if (maxBid > 0)
+                maxBidPrice = Instrument.MasterInstrument.RoundToTickSize(tmpBidPrice);
 
             return maxBid > 0 || maxAsk > 0;
         }
@@ -263,34 +244,18 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (barsAgo < 0 || barsAgo >= BarsArray[volBip].Count)
                 return false;
 
-            double low = Lows[volBip][barsAgo];
-            double high = Highs[volBip][barsAgo];
+            double tmpPrice;
+            long maxCombined = volBarsType.Volumes[volBarIndex].GetMaximumVolume(null, out tmpPrice);
 
-            if (high < low)
-            {
-                double t = high;
-                high = low;
-                low = t;
-            }
+            if (maxCombined <= 0 || double.IsNaN(tmpPrice))
+                return false;
 
-            int priceLevels = Math.Max(1, (int)Math.Round((high - low) / volTickSize)) + 1;
+            priceHVN = Instrument.MasterInstrument.RoundToTickSize(tmpPrice);
 
-            for (int level = 0; level < priceLevels; level++)
-            {
-                double price = Instrument.MasterInstrument.RoundToTickSize(low + level * volTickSize);
-                long bidVol = volBarsType.Volumes[volBarIndex].GetBidVolumeForPrice(price);
-                long askVol = volBarsType.Volumes[volBarIndex].GetAskVolumeForPrice(price);
+            bidHVN = volBarsType.Volumes[volBarIndex].GetBidVolumeForPrice(priceHVN);
+            askHVN = volBarsType.Volumes[volBarIndex].GetAskVolumeForPrice(priceHVN);
 
-                long total = bidVol + askVol;
-
-                if (total > totalHVN)
-                {
-                    totalHVN = total;
-                    priceHVN = price;
-                    bidHVN = bidVol;
-                    askHVN = askVol;
-                }
-            }
+            totalHVN = bidHVN + askHVN;
 
             return totalHVN > 0 && !double.IsNaN(priceHVN);
         }
@@ -745,72 +710,58 @@ namespace NinjaTrader.NinjaScript.Indicators
 }
 
 #region NinjaScript generated code. Neither change nor remove.
+
 namespace NinjaTrader.NinjaScript.Indicators
 {
-    public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
-    {
-        private a2c[] cachea2c;
+	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
+	{
+		private a2c[] cachea2c;
+		public a2c a2c(int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
+		{
+			return a2c(Input, timeFrameMinutes, resetSession, showHistory, multiplyVolume, minContracts, absMultiplyVolume, absMinContracts, absMinSideShare, divTimeFrameMinutes, divLookbackBars, divMinPriceMoveTicks, divMinDeltaMove);
+		}
 
-        public a2c a2c(int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
-        {
-            return a2c(Input, timeFrameMinutes, resetSession, showHistory, multiplyVolume, minContracts, absMultiplyVolume, absMinContracts, absMinSideShare, divTimeFrameMinutes, divLookbackBars, divMinPriceMoveTicks, divMinDeltaMove);
-        }
-
-        public a2c a2c(ISeries<double> input, int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
-        {
-            if (cachea2c != null)
-                for (int idx = 0; idx < cachea2c.Length; idx++)
-                    if (cachea2c[idx] != null && cachea2c[idx].TimeFrameMinutes == timeFrameMinutes && cachea2c[idx].ResetSession == resetSession && cachea2c[idx].ShowHistory == showHistory && cachea2c[idx].MultiplyVolume == multiplyVolume && cachea2c[idx].MinContracts == minContracts && cachea2c[idx].AbsMultiplyVolume == absMultiplyVolume && cachea2c[idx].AbsMinContracts == absMinContracts && cachea2c[idx].AbsMinSideShare == absMinSideShare && cachea2c[idx].DivTimeFrameMinutes == divTimeFrameMinutes && cachea2c[idx].DivLookbackBars == divLookbackBars && cachea2c[idx].DivMinPriceMoveTicks == divMinPriceMoveTicks && cachea2c[idx].DivMinDeltaMove == divMinDeltaMove && cachea2c[idx].EqualsInput(input))
-                        return cachea2c[idx];
-
-            return CacheIndicator<a2c>(new a2c()
-            {
-                TimeFrameMinutes = timeFrameMinutes,
-                ResetSession = resetSession,
-                ShowHistory = showHistory,
-                MultiplyVolume = multiplyVolume,
-                MinContracts = minContracts,
-                AbsMultiplyVolume = absMultiplyVolume,
-                AbsMinContracts = absMinContracts,
-                AbsMinSideShare = absMinSideShare,
-                DivTimeFrameMinutes = divTimeFrameMinutes,
-                DivLookbackBars = divLookbackBars,
-                DivMinPriceMoveTicks = divMinPriceMoveTicks,
-                DivMinDeltaMove = divMinDeltaMove
-            }, input, ref cachea2c);
-        }
-    }
+		public a2c a2c(ISeries<double> input, int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
+		{
+			if (cachea2c != null)
+				for (int idx = 0; idx < cachea2c.Length; idx++)
+					if (cachea2c[idx] != null && cachea2c[idx].TimeFrameMinutes == timeFrameMinutes && cachea2c[idx].ResetSession == resetSession && cachea2c[idx].ShowHistory == showHistory && cachea2c[idx].MultiplyVolume == multiplyVolume && cachea2c[idx].MinContracts == minContracts && cachea2c[idx].AbsMultiplyVolume == absMultiplyVolume && cachea2c[idx].AbsMinContracts == absMinContracts && cachea2c[idx].AbsMinSideShare == absMinSideShare && cachea2c[idx].DivTimeFrameMinutes == divTimeFrameMinutes && cachea2c[idx].DivLookbackBars == divLookbackBars && cachea2c[idx].DivMinPriceMoveTicks == divMinPriceMoveTicks && cachea2c[idx].DivMinDeltaMove == divMinDeltaMove && cachea2c[idx].EqualsInput(input))
+						return cachea2c[idx];
+			return CacheIndicator<a2c>(new a2c(){ TimeFrameMinutes = timeFrameMinutes, ResetSession = resetSession, ShowHistory = showHistory, MultiplyVolume = multiplyVolume, MinContracts = minContracts, AbsMultiplyVolume = absMultiplyVolume, AbsMinContracts = absMinContracts, AbsMinSideShare = absMinSideShare, DivTimeFrameMinutes = divTimeFrameMinutes, DivLookbackBars = divLookbackBars, DivMinPriceMoveTicks = divMinPriceMoveTicks, DivMinDeltaMove = divMinDeltaMove }, input, ref cachea2c);
+		}
+	}
 }
 
 namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
-    public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
-    {
-        public Indicators.a2c a2c(int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
-        {
-            return indicator.a2c(Input, timeFrameMinutes, resetSession, showHistory, multiplyVolume, minContracts, absMultiplyVolume, absMinContracts, absMinSideShare, divTimeFrameMinutes, divLookbackBars, divMinPriceMoveTicks, divMinDeltaMove);
-        }
+	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
+	{
+		public Indicators.a2c a2c(int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
+		{
+			return indicator.a2c(Input, timeFrameMinutes, resetSession, showHistory, multiplyVolume, minContracts, absMultiplyVolume, absMinContracts, absMinSideShare, divTimeFrameMinutes, divLookbackBars, divMinPriceMoveTicks, divMinDeltaMove);
+		}
 
-        public Indicators.a2c a2c(ISeries<double> input, int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
-        {
-            return indicator.a2c(input, timeFrameMinutes, resetSession, showHistory, multiplyVolume, minContracts, absMultiplyVolume, absMinContracts, absMinSideShare, divTimeFrameMinutes, divLookbackBars, divMinPriceMoveTicks, divMinDeltaMove);
-        }
-    }
+		public Indicators.a2c a2c(ISeries<double> input , int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
+		{
+			return indicator.a2c(input, timeFrameMinutes, resetSession, showHistory, multiplyVolume, minContracts, absMultiplyVolume, absMinContracts, absMinSideShare, divTimeFrameMinutes, divLookbackBars, divMinPriceMoveTicks, divMinDeltaMove);
+		}
+	}
 }
 
 namespace NinjaTrader.NinjaScript.Strategies
 {
-    public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
-    {
-        public Indicators.a2c a2c(int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
-        {
-            return indicator.a2c(Input, timeFrameMinutes, resetSession, showHistory, multiplyVolume, minContracts, absMultiplyVolume, absMinContracts, absMinSideShare, divTimeFrameMinutes, divLookbackBars, divMinPriceMoveTicks, divMinDeltaMove);
-        }
+	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
+	{
+		public Indicators.a2c a2c(int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
+		{
+			return indicator.a2c(Input, timeFrameMinutes, resetSession, showHistory, multiplyVolume, minContracts, absMultiplyVolume, absMinContracts, absMinSideShare, divTimeFrameMinutes, divLookbackBars, divMinPriceMoveTicks, divMinDeltaMove);
+		}
 
-        public Indicators.a2c a2c(ISeries<double> input, int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
-        {
-            return indicator.a2c(input, timeFrameMinutes, resetSession, showHistory, multiplyVolume, minContracts, absMultiplyVolume, absMinContracts, absMinSideShare, divTimeFrameMinutes, divLookbackBars, divMinPriceMoveTicks, divMinDeltaMove);
-        }
-    }
+		public Indicators.a2c a2c(ISeries<double> input , int timeFrameMinutes, bool resetSession, bool showHistory, double multiplyVolume, int minContracts, double absMultiplyVolume, int absMinContracts, double absMinSideShare, int divTimeFrameMinutes, int divLookbackBars, int divMinPriceMoveTicks, int divMinDeltaMove)
+		{
+			return indicator.a2c(input, timeFrameMinutes, resetSession, showHistory, multiplyVolume, minContracts, absMultiplyVolume, absMinContracts, absMinSideShare, divTimeFrameMinutes, divLookbackBars, divMinPriceMoveTicks, divMinDeltaMove);
+		}
+	}
 }
+
 #endregion
