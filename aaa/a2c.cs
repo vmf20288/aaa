@@ -669,11 +669,11 @@ namespace NinjaTrader.NinjaScript.Indicators
             using (var volTextBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(170, 170, 170, 180)))
             using (var deltaPosBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(60, 200, 120, 190)))
             using (var deltaNegBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(220, 80, 80, 190)))
-            using (var cumPosBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(60, 180, 110, 120)))
-            using (var cumNegBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(200, 70, 70, 120)))
+            using (var cumPosBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(60, 180, 110, 170)))
+            using (var cumNegBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(200, 70, 70, 170)))
             using (var textFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 12f))
             // Texto VOL/Δ/CΔ más grande
-            using (var valueFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 14f))
+            using (var valueFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 16f))
             {
                 // Centrar valores en su celda (ancho = centro-a-centro)
                 valueFormat.TextAlignment = TextAlignment.Center;
