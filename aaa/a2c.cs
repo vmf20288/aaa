@@ -516,9 +516,9 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         private static string FormatVolumeK(long volume)
         {
-            // Vol: miles sin decimal con "k" y redondeado
+            // Vol: miles sin decimal y redondeado (SIN "k")
             long k = (long)Math.Round(volume / 1000.0, 0, MidpointRounding.AwayFromZero);
-            return k.ToString("0", CultureInfo.InvariantCulture) + "k";
+            return k.ToString("0", CultureInfo.InvariantCulture);
         }
 
         private static string FormatCumDeltaK(long cumDelta)
@@ -526,7 +526,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             // CΔ: miles con 1 decimal y "k" (ej 1.5k, -0.5k, 0.1k)
             double k = cumDelta / 1000.0;
             k = Math.Round(k, 1, MidpointRounding.AwayFromZero);
-            return k.ToString("0.0", CultureInfo.InvariantCulture) + "k";
+            return k.ToString("0.0", CultureInfo.InvariantCulture);
         }
         #endregion
 
@@ -637,13 +637,20 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (panel == null)
                 return;
 
+            // Confirmaciones (igual que antes)
             float rowHeight = 18f;
+
+            // SOLO filas inferiores (VOL/Δ/CΔ) más altas
+            float lowerRowHeight = 24f;
+
             float topMargin = 4f;
             float bottomMargin = 2f;
 
-            // 4 filas originales + 3 nuevas (VOL/Δ/CΔ)
-            int totalRows = 7;
-            float totalHeight = rowHeight * totalRows + topMargin + bottomMargin;
+            int upperRows = 4; // Order Limit, Absorption, (vacía), Divergence
+            int lowerRows = 3; // Volume, Delta, Cum delta
+            int totalRows = upperRows + lowerRows;
+
+            float totalHeight = rowHeight * upperRows + lowerRowHeight * lowerRows + topMargin + bottomMargin;
 
             float bottom = panel.Y + panel.H;
             float top = bottom - totalHeight;
@@ -656,6 +663,8 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             using (var bgBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(10, 10, 10, 200)))
             using (var gridBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(200, 200, 200, 120)))
+            // Línea divisoria debajo de Divergence: más gruesa + apenas más visible
+            using (var dividerBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(220, 220, 220, 160)))
             using (var textBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(200, 200, 200, 180)))
             using (var volTextBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(170, 170, 170, 180)))
             using (var deltaPosBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(60, 200, 120, 190)))
@@ -663,7 +672,8 @@ namespace NinjaTrader.NinjaScript.Indicators
             using (var cumPosBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(60, 180, 110, 120)))
             using (var cumNegBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(200, 70, 70, 120)))
             using (var textFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 12f))
-            using (var valueFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 12f))
+            // Texto VOL/Δ/CΔ más grande
+            using (var valueFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 14f))
             {
                 // Centrar valores en su celda (ancho = centro-a-centro)
                 valueFormat.TextAlignment = TextAlignment.Center;
@@ -674,40 +684,57 @@ namespace NinjaTrader.NinjaScript.Indicators
                 float firstLineY = top + topMargin;
                 float lastLineY = bottom - bottomMargin;
 
-                // Bordes y separadores horizontales
+                float GetRowTop(int rowIndex)
+                {
+                    if (rowIndex <= 0)
+                        return firstLineY;
+
+                    if (rowIndex < upperRows)
+                        return firstLineY + rowHeight * rowIndex;
+
+                    return firstLineY + rowHeight * upperRows + lowerRowHeight * (rowIndex - upperRows);
+                }
+
+                // Bordes superior e inferior
                 rt.DrawLine(new SharpDX.Vector2(panel.X, firstLineY), new SharpDX.Vector2(panel.X + panel.W, firstLineY), gridBrush, 1f);
 
+                // Separadores horizontales internos
                 for (int i = 1; i < totalRows; i++)
                 {
-                    float y = firstLineY + rowHeight * i;
-                    rt.DrawLine(new SharpDX.Vector2(panel.X, y), new SharpDX.Vector2(panel.X + panel.W, y), gridBrush, 1f);
+                    float y = GetRowTop(i);
+
+                    if (i == upperRows) // debajo de Divergence (entre row 4 y row 5 visualmente)
+                        rt.DrawLine(new SharpDX.Vector2(panel.X, y), new SharpDX.Vector2(panel.X + panel.W, y), dividerBrush, 2f);
+                    else
+                        rt.DrawLine(new SharpDX.Vector2(panel.X, y), new SharpDX.Vector2(panel.X + panel.W, y), gridBrush, 1f);
                 }
 
                 rt.DrawLine(new SharpDX.Vector2(panel.X, lastLineY), new SharpDX.Vector2(panel.X + panel.W, lastLineY), gridBrush, 1f);
 
                 // Labels derecha (igual estilo que antes)
-                void DrawRightLabel(string label, float rowTopY)
+                void DrawRightLabel(string label, float rowTopY, float rowH)
                 {
-                    SharpDX.RectangleF r = new SharpDX.RectangleF(panel.X, rowTopY, panel.W, rowHeight);
-                    using (var layout = new TextLayout(Core.Globals.DirectWriteFactory, label, textFormat, r.Width, rowHeight))
+                    SharpDX.RectangleF r = new SharpDX.RectangleF(panel.X, rowTopY, panel.W, rowH);
+                    using (var layout = new TextLayout(Core.Globals.DirectWriteFactory, label, textFormat, r.Width, rowH))
                     {
                         float textX = panel.X + panel.W - layout.Metrics.Width - 6f;
-                        float textY = rowTopY + (rowHeight - layout.Metrics.Height) / 2f;
+                        float textY = rowTopY + (rowH - layout.Metrics.Height) / 2f;
                         rt.DrawTextLayout(new SharpDX.Vector2(textX, textY), layout, textBrush);
                     }
                 }
 
                 // Row 1
-                DrawRightLabel("Order Limit", firstLineY + rowHeight * 0f);
+                DrawRightLabel("Order Limit", GetRowTop(0), rowHeight);
                 // Row 2
-                DrawRightLabel("Absorption", firstLineY + rowHeight * 1f);
+                DrawRightLabel("Absorption", GetRowTop(1), rowHeight);
                 // Row 3 se deja vacía (NO tocar)
                 // Row 4
-                DrawRightLabel("Divergence", firstLineY + rowHeight * 3f);
+                DrawRightLabel("Divergence", GetRowTop(3), rowHeight);
+
                 // Row 5..7 nuevas
-                DrawRightLabel("Volume", firstLineY + rowHeight * 4f);
-                DrawRightLabel("Delta", firstLineY + rowHeight * 5f);
-                DrawRightLabel("Cum delta", firstLineY + rowHeight * 6f);
+                DrawRightLabel("Volume", GetRowTop(4), lowerRowHeight);
+                DrawRightLabel("Delta", GetRowTop(5), lowerRowHeight);
+                DrawRightLabel("Cum delta", GetRowTop(6), lowerRowHeight);
 
                 int startBar = Math.Max(ChartBars.FromIndex, 0);
                 int endBar = Math.Min(ChartBars.ToIndex, Bars.Count - 1);
@@ -717,10 +744,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                 float row2Middle = firstLineY + rowHeight * 1.5f;
                 float row4Middle = firstLineY + rowHeight * 3.5f;
 
-                // Rects de valores (topY por fila)
-                float rowVolTop = firstLineY + rowHeight * 4f;
-                float rowDelTop = firstLineY + rowHeight * 5f;
-                float rowCumTop = firstLineY + rowHeight * 6f;
+                // Rects de valores (topY por fila) - filas inferiores más altas
+                float rowVolTop = GetRowTop(4);
+                float rowDelTop = GetRowTop(5);
+                float rowCumTop = GetRowTop(6);
 
                 for (int barIndex = startBar; barIndex <= endBar; barIndex++)
                 {
@@ -768,14 +795,14 @@ namespace NinjaTrader.NinjaScript.Indicators
                     if (volTotalByBar.TryGetValue(barIndex, out long vTotal))
                     {
                         string txt = FormatVolumeK(vTotal);
-                        var rect = new SharpDX.RectangleF(cellX, rowVolTop, cellW, rowHeight);
+                        var rect = new SharpDX.RectangleF(cellX, rowVolTop, cellW, lowerRowHeight);
                         rt.DrawText(txt, valueFormat, rect, volTextBrush);
                     }
 
                     if (deltaByBar.TryGetValue(barIndex, out long dBar))
                     {
                         string txt = FormatDeltaRounded(dBar);
-                        var rect = new SharpDX.RectangleF(cellX, rowDelTop, cellW, rowHeight);
+                        var rect = new SharpDX.RectangleF(cellX, rowDelTop, cellW, lowerRowHeight);
 
                         if (dBar > 0) rt.DrawText(txt, valueFormat, rect, deltaPosBrush);
                         else if (dBar < 0) rt.DrawText(txt, valueFormat, rect, deltaNegBrush);
@@ -785,7 +812,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                     if (cumDeltaByBar.TryGetValue(barIndex, out long cdBar))
                     {
                         string txt = FormatCumDeltaK(cdBar);
-                        var rect = new SharpDX.RectangleF(cellX, rowCumTop, cellW, rowHeight);
+                        var rect = new SharpDX.RectangleF(cellX, rowCumTop, cellW, lowerRowHeight);
 
                         if (cdBar > 0) rt.DrawText(txt, valueFormat, rect, cumPosBrush);
                         else if (cdBar < 0) rt.DrawText(txt, valueFormat, rect, cumNegBrush);
