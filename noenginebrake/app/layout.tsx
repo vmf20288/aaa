@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
+import { ServiceWorkerRegister } from "./service-worker-register";
 
 export const metadata: Metadata = {
   title: "No Engine Brake",
@@ -51,6 +52,7 @@ export default function RootLayout({
         <footer className="border-t border-white/10 bg-black/40 py-6 text-center text-sm text-slate-300">
           MVP Project – No Engine Brake
         </footer>
+        <ServiceWorkerRegister />
       </body>
     </html>
   );
