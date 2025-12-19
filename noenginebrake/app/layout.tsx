@@ -4,15 +4,14 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "No Engine Brake",
-  description: "MVP web para la comunidad de No Engine Brake",
+  description: "MVP website for the No Engine Brake community",
 };
 
 const navItems = [
-  { href: "/", label: "Inicio" },
-  { href: "/aprende", label: "Aprende" },
-  { href: "/recetas", label: "Recetas" },
-  { href: "/comunidad", label: "Comunidad" },
-  { href: "/patrocinio", label: "Patrocinio" },
+  { href: "/", label: "Home" },
+  { href: "/aprende", label: "Learn" },
+  { href: "/recetas", label: "Recipes" },
+  { href: "/comunidad", label: "Community" },
 ];
 
 function Navigation() {
@@ -43,14 +42,14 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="es">
+    <html lang="en">
       <body className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-50">
         <Navigation />
         <main className="container mx-auto px-6 py-10 space-y-10">
           {children}
         </main>
         <footer className="border-t border-white/10 bg-black/40 py-6 text-center text-sm text-slate-300">
-          Proyecto MVP – No Engine Brake
+          MVP Project – No Engine Brake
         </footer>
       </body>
     </html>
