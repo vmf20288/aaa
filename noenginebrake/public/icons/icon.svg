@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">No Engine Brake Icon</title>
+  <desc id="desc">Simplified monogram for the No Engine Brake PWA placeholder icon.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0ea5e9" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="20" fill="url(#bg)" />
+  <path d="M36 92V36h20l16 24 16-24h20v56H92V65.2L72 92 52 65.2V92z" fill="#e2e8f0" />
+</svg>
