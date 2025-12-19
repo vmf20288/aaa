@@ -16,4 +16,8 @@ Proyecto MVP creado con Next.js (App Router), TypeScript, ESLint y Tailwind CSS.
    ```
 3. Abre `http://localhost:3000` en tu navegador.
 
+## Secciones incluidas
+- Inicio con accesos rápidos.
+- Aprende, Recetas, Comunidad y Patrocinio listos como páginas base.
+
 El contenido es placeholder y está listo para iterar.
