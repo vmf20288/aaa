@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 const cards = [
   {
     title: "Aprende",
@@ -47,7 +49,7 @@ export default function HomePage() {
 
       <section className="grid gap-6 sm:grid-cols-2">
         {cards.map((card) => (
-          <a
+          <Link
             key={card.title}
             href={card.href}
             className="group rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg transition hover:-translate-y-1 hover:border-cyan-200/50 hover:shadow-cyan-500/20"
@@ -59,7 +61,7 @@ export default function HomePage() {
               </span>
             </div>
             <p className="mt-3 text-slate-200">{card.description}</p>
-          </a>
+          </Link>
         ))}
       </section>
     </div>

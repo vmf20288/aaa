@@ -3,8 +3,8 @@ export default function RecetasPage() {
     <section className="space-y-4">
       <h1 className="text-3xl font-semibold">Recetas</h1>
       <p className="text-lg text-slate-200">
-        Ideas rápidas y replicables para iterar sobre el proyecto. Cada tarjeta puede
-dejar espacio para ingredientes, pasos y notas de la comunidad.
+        Ideas rápidas y replicables para iterar sobre el proyecto. Cada tarjeta puede dejar
+        espacio para ingredientes, pasos y notas de la comunidad.
       </p>
       <div className="grid gap-4 sm:grid-cols-2">
         {[1, 2, 3, 4].map((num) => (
