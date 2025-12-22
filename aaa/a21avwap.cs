@@ -386,6 +386,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         [Category("Global")]
         [Display(Name = "anchored 2", Order = 3, GroupName = "Global")]
+        [DefaultValue(false)]
         public bool Anchored2 { get; set; }
 
         [Category("Global")]
@@ -394,6 +395,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         [Category("Global")]
         [Display(Name = "vwap weekly", Order = 5, GroupName = "Global")]
+        [DefaultValue(true)]
         public bool VwapWeeklyEnabled { get; set; }
 
         [Category("Anchored 1")]
