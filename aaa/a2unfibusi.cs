@@ -140,7 +140,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
         [XmlIgnore]
         [Display(Name = "Color linea", GroupName = "a2unfibusi", Order = 3)]
-        public Brush ColorLinea { get; set; } = Brushes.Gold;
+        public Brush ColorLinea { get; set; } = Brushes.Silver;
 
         [Browsable(false)]
         public string ColorLineaSerializable
