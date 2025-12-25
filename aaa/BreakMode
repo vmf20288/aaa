@@ -1,0 +1,8 @@
+namespace NinjaTrader.NinjaScript
+{
+    public enum BreakMode
+    {
+        Immediate = 1,
+        Reentry   = 2
+    }
+}
