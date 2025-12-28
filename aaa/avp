@@ -1,0 +1,960 @@
+#region Using declarations
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using System.Linq;
+using System.Xml.Serialization;
+using System.Windows.Media;
+
+using NinjaTrader.Data;
+using NinjaTrader.Gui;
+using NinjaTrader.Gui.Tools;
+using NinjaTrader.NinjaScript;
+using NinjaTrader.NinjaScript.BarsTypes;
+using NinjaTrader.NinjaScript.DrawingTools;
+#endregion
+
+// =====================================================================================
+// avp.cs  (v1.1)
+// -------------------------------------------------------------------------------------
+// Qué hace:
+//   - Construye un Volume-At-Price (VAP) usando Volumetric (Order Flow+) en una serie interna.
+//   - Detecta HVN (picos) y LVN (valles) del perfil y dibuja líneas horizontales.
+//
+// Filosofía de esta versión:
+//   - BARATA: Calcula en OnBarClose sobre la serie volumétrica interna (no OnEachTick).
+//   - FIEL: Usa Bid+Ask por precio desde VolumetricBarsType (Order Flow+).
+//   - PRÁCTICA: Puedes usar Rolling (X minutos), Session o Weekly.
+//   - "Max VP price levels" estilo TradingView: opción AutoBinFromMaxLevels.
+// =====================================================================================
+// v1.1 (fixes):
+//   - Enum del modo (AvpProfileMode) definido fuera de la clase para evitar errores del generador NinjaScript.
+//   - Validación de índice: usamos BarsArray[volBip].Count (evita "method group" en Volumes.Count).
+// =====================================================================================
+
+// =====================================================================================
+// Enums (fuera de la clase)  -> evita errores del generador de NinjaScript
+// -------------------------------------------------------------------------------------
+// Nota: NinjaTrader a veces no resuelve bien enums anidados dentro de la clase cuando
+// genera el código de cache (la región "NinjaScript generated code").
+// Por eso lo declaramos a nivel de namespace.
+// =====================================================================================
+
+namespace NinjaTrader.NinjaScript
+{
+    public enum AvpProfileMode
+    {
+        RollingMinutes = 0,
+        Session        = 1,
+        Weekly         = 2
+    }
+}
+
+namespace NinjaTrader.NinjaScript.Indicators
+{
+    public class avp : Indicator
+    {
+
+        private class BarContribution
+        {
+            public DateTime Time;
+            public Dictionary<long, long> VolByTick = new Dictionary<long, long>(); // tickIndex -> volume
+        }
+
+        private class Node
+        {
+            public int    Index;        // índice en el array de bins
+            public long   BinStartTick; // tickIndex del bin (inicio)
+            public double Price;        // precio (centro del bin)
+            public double Volume;       // volumen del bin (para ordenar)
+        }
+
+        // ---------------------------
+        // Constantes
+        // ---------------------------
+        private const int MaxNodesLimit = 6;
+
+        // ---------------------------
+        // Campos internos
+        // ---------------------------
+        private int volBip = -1;
+        private VolumetricBarsType volBarsType;
+        private double tickSize = 0.0;
+
+        // Perfil en resolución máxima (tick a tick)
+        private readonly Dictionary<long, long> profileVolByTick = new Dictionary<long, long>();
+
+        // Para Rolling: guardar contribución por barra para poder restar (ventana deslizante)
+        private readonly Queue<BarContribution> rollingQueue = new Queue<BarContribution>();
+
+        // Control de semana (futuros ETH, domingo 18:00)
+        private DateTime currentWeekStart = DateTime.MinValue;
+
+        // Últimos nodos detectados (para consumo externo e integración posterior)
+        private double lastPOC = double.NaN;
+        private readonly double[] lastHVN = new double[MaxNodesLimit];
+        private readonly double[] lastLVN = new double[MaxNodesLimit];
+
+        private string instanceTag = "";
+
+        // ---------------------------
+        // Parámetros (UI)
+        // ---------------------------
+        [NinjaScriptProperty]
+        [Display(Name = "Mode", GroupName = "Profile", Order = 1)]
+        public NinjaTrader.NinjaScript.AvpProfileMode Mode { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, 10080)]
+        [Display(Name = "Window minutes (Rolling)", GroupName = "Profile", Order = 2)]
+        public int WindowMinutes { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, 1440)]
+        [Display(Name = "Volumetric TF (min)", Description = "Timeframe de la serie interna Volumetric (Order Flow+).", GroupName = "Profile", Order = 3)]
+        public int VolumetricTimeFrameMin { get; set; }
+
+        // --- Resolución / bins ---
+        [NinjaScriptProperty]
+        [Display(Name = "Auto bin from MaxLevels", Description = "Si ON: calcula BinTicks para aproximar MaxLevels (estilo TradingView Max VP price levels).", GroupName = "Resolution", Order = 1)]
+        public bool AutoBinFromMaxLevels { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(5, 500)]
+        [Display(Name = "MaxLevels (Auto)", GroupName = "Resolution", Order = 2)]
+        public int MaxLevels { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, 200)]
+        [Display(Name = "Bin ticks (Fixed)", Description = "Si AutoBin=OFF: agrupa por este tamaño (en ticks). Subirlo hace el perfil más \"cuadrado\".", GroupName = "Resolution", Order = 3)]
+        public int BinTicks { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, 21)]
+        [Display(Name = "Smooth bins", Description = "Suavizado (media móvil) para detectar picos/valles. Recomendado impar: 1,3,5...", GroupName = "Nodes", Order = 1)]
+        public int SmoothBins { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, MaxNodesLimit)]
+        [Display(Name = "Max HVN", GroupName = "Nodes", Order = 2)]
+        public int MaxHVN { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0, MaxNodesLimit)]
+        [Display(Name = "Max LVN", GroupName = "Nodes", Order = 3)]
+        public int MaxLVN { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0, 2000)]
+        [Display(Name = "Min distance (ticks)", Description = "Separación mínima entre nodos para evitar duplicados.", GroupName = "Nodes", Order = 4)]
+        public int MinNodeDistanceTicks { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0.0, 1.0)]
+        [Display(Name = "HVN min % of POC", Description = "Un pico debe ser >= este % del volumen del POC para contarse como HVN.", GroupName = "Nodes", Order = 5)]
+        public double HVNMinPctOfPOC { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0.0, 1.0)]
+        [Display(Name = "LVN max % of POC", Description = "Un valle debe ser <= este % del volumen del POC para contarse como LVN.", GroupName = "Nodes", Order = 6)]
+        public double LVNMaxPctOfPOC { get; set; }
+
+        // --- Visual ---
+        [NinjaScriptProperty]
+        [Display(Name = "Draw POC", GroupName = "Visual", Order = 1)]
+        public bool DrawPOC { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Draw HVN", GroupName = "Visual", Order = 2)]
+        public bool DrawHVN { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Draw LVN", GroupName = "Visual", Order = 3)]
+        public bool DrawLVN { get; set; }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "POC color", GroupName = "Visual", Order = 10)]
+        public Brush POCBrush { get; set; }
+
+        [Browsable(false)]
+        public string POCBrushSerializable
+        {
+            get { return Serialize.BrushToString(POCBrush); }
+            set { POCBrush = Serialize.StringToBrush(value); }
+        }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "HVN color", GroupName = "Visual", Order = 11)]
+        public Brush HVNBrush { get; set; }
+
+        [Browsable(false)]
+        public string HVNBrushSerializable
+        {
+            get { return Serialize.BrushToString(HVNBrush); }
+            set { HVNBrush = Serialize.StringToBrush(value); }
+        }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "LVN color", GroupName = "Visual", Order = 12)]
+        public Brush LVNBrush { get; set; }
+
+        [Browsable(false)]
+        public string LVNBrushSerializable
+        {
+            get { return Serialize.BrushToString(LVNBrush); }
+            set { LVNBrush = Serialize.StringToBrush(value); }
+        }
+
+        [NinjaScriptProperty]
+        [Range(1, 6)]
+        [Display(Name = "Line width", GroupName = "Visual", Order = 13)]
+        public int LineWidth { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "LVN dash", GroupName = "Visual", Order = 14)]
+        public DashStyleHelper LVNDash { get; set; }
+
+        // ---------------------------
+        // Salidas / API pública (para integrar después)
+        // ---------------------------
+        [Browsable(false)] public double POCPrice => lastPOC;
+
+        public double GetHVN(int index1Based)
+        {
+            if (index1Based < 1 || index1Based > MaxNodesLimit) return double.NaN;
+            return lastHVN[index1Based - 1];
+        }
+
+        public double GetLVN(int index1Based)
+        {
+            if (index1Based < 1 || index1Based > MaxNodesLimit) return double.NaN;
+            return lastLVN[index1Based - 1];
+        }
+
+        // ---------------------------
+        // Lifecycle
+        // ---------------------------
+        protected override void OnStateChange()
+        {
+            if (State == State.SetDefaults)
+            {
+                Name                     = "avp";
+                Description              = "HVN/LVN detector basado en Volumetric (Order Flow+)";
+                Calculate                = Calculate.OnBarClose;
+                IsOverlay                = true;
+                DrawOnPricePanel         = true;
+                DisplayInDataBox         = false;
+                PaintPriceMarkers        = false;
+                IsSuspendedWhileInactive = true;
+
+                // Defaults pensados para NQ intradía (barato + legible)
+                Mode                   = NinjaTrader.NinjaScript.AvpProfileMode.RollingMinutes;
+                WindowMinutes          = 90;
+                VolumetricTimeFrameMin = 30;
+
+                AutoBinFromMaxLevels = true;
+                MaxLevels            = 25;
+                BinTicks             = 4;
+
+                SmoothBins            = 3;
+                MaxHVN                = 3;
+                MaxLVN                = 2;
+                MinNodeDistanceTicks  = 12;
+                HVNMinPctOfPOC        = 0.30;
+                LVNMaxPctOfPOC        = 0.15;
+
+                DrawPOC = true;
+                DrawHVN = true;
+                DrawLVN = true;
+
+                POCBrush = Brushes.DodgerBlue;
+                HVNBrush = Brushes.IndianRed;
+                LVNBrush = Brushes.Goldenrod;
+
+                LineWidth = 2;
+                LVNDash   = DashStyleHelper.Dash;
+            }
+            else if (State == State.Configure)
+            {
+                // Serie interna Volumetric (Order Flow+). ticksPerLevel = 1 para máxima fidelidad.
+                int tf = Math.Max(1, VolumetricTimeFrameMin);
+                AddVolumetric(Instrument.FullName, BarsPeriodType.Minute, tf, VolumetricDeltaType.BidAsk, 1);
+                volBip = BarsArray.Length - 1;
+            }
+            else if (State == State.DataLoaded)
+            {
+                volBarsType = BarsArray[volBip].BarsType as VolumetricBarsType;
+                tickSize    = Instrument.MasterInstrument.TickSize;
+
+                instanceTag = $"{Name}_{Instrument.MasterInstrument.Name}_{Guid.NewGuid().ToString("N").Substring(0, 6)}";
+
+                ResetAll();
+            }
+        }
+
+        private void ResetAll()
+        {
+            profileVolByTick.Clear();
+            rollingQueue.Clear();
+
+            lastPOC = double.NaN;
+            for (int i = 0; i < MaxNodesLimit; i++)
+            {
+                lastHVN[i] = double.NaN;
+                lastLVN[i] = double.NaN;
+            }
+
+            currentWeekStart = DateTime.MinValue;
+
+            // Limpia dibujos del indicador
+            try { RemoveDrawObjects(); } catch { }
+        }
+
+        private void ResetProfileOnly()
+        {
+            profileVolByTick.Clear();
+            rollingQueue.Clear();
+
+            lastPOC = double.NaN;
+            for (int i = 0; i < MaxNodesLimit; i++)
+            {
+                lastHVN[i] = double.NaN;
+                lastLVN[i] = double.NaN;
+            }
+
+            // Borra líneas actuales
+            RemoveNodeDraws();
+        }
+
+        protected override void OnBarUpdate()
+        {
+            // Solo procesamos en la serie volumétrica interna (bar close)
+            if (BarsInProgress != volBip)
+                return;
+
+            if (volBarsType == null || tickSize <= 0)
+                return;
+
+            if (CurrentBars[volBip] < 0)
+                return;
+
+            DateTime barTime = Times[volBip][0]; // timestamp de la barra (inicio)
+
+            // --- Reset según modo ---
+            if (Mode == NinjaTrader.NinjaScript.AvpProfileMode.Session)
+            {
+                if (BarsArray[volBip].IsFirstBarOfSession)
+                    ResetProfileOnly();
+            }
+            else if (Mode == NinjaTrader.NinjaScript.AvpProfileMode.Weekly)
+            {
+                DateTime ws = GetFuturesWeekStart(barTime);
+                if (ws != currentWeekStart)
+                {
+                    currentWeekStart = ws;
+                    ResetProfileOnly();
+                }
+            }
+
+            // --- Añadir la contribución de esta barra cerrada al perfil ---
+            AddClosedBarToProfile(CurrentBars[volBip], barTime);
+
+            // --- Rolling: quitar barras viejas ---
+            if (Mode == NinjaTrader.NinjaScript.AvpProfileMode.RollingMinutes)
+                TrimRolling(barTime);
+
+            // --- Calcular nodos + dibujar ---
+            ComputeNodesAndDraw();
+        }
+
+        // ---------------------------
+        // Perfil: añadir / quitar
+        // ---------------------------
+        private void AddClosedBarToProfile(int barIndex, DateTime barTime)
+        {
+            // Nota: VolumetricBarsType.Volumes no siempre expone Count como propiedad (puede ser un método/extension).
+            // Usamos el conteo de barras de la serie volumétrica para validar el índice.
+            if (barIndex < 0 || barIndex >= BarsArray[volBip].Count)
+                return;
+
+            double lo = Lows[volBip][0];
+            double hi = Highs[volBip][0];
+            if (hi < lo) { double t = hi; hi = lo; lo = t; }
+
+            double start = Instrument.MasterInstrument.RoundToTickSize(lo);
+            double end   = Instrument.MasterInstrument.RoundToTickSize(hi);
+
+            var volumes = volBarsType.Volumes[barIndex];
+
+            BarContribution contrib = null;
+            if (Mode == NinjaTrader.NinjaScript.AvpProfileMode.RollingMinutes)
+                contrib = new BarContribution { Time = barTime };
+
+            for (double p = start; p <= end + 1e-10; p += tickSize)
+            {
+                double price = Instrument.MasterInstrument.RoundToTickSize(p);
+
+                long v = volumes.GetBidVolumeForPrice(price) + volumes.GetAskVolumeForPrice(price);
+                if (v <= 0)
+                    continue;
+
+                long tickIdx = PriceToTickIndex(price);
+
+                // Perfil global (tick-level)
+                if (profileVolByTick.TryGetValue(tickIdx, out long cur))
+                    profileVolByTick[tickIdx] = cur + v;
+                else
+                    profileVolByTick[tickIdx] = v;
+
+                // Para Rolling: guardar contribución por barra
+                if (contrib != null)
+                {
+                    if (contrib.VolByTick.TryGetValue(tickIdx, out long c))
+                        contrib.VolByTick[tickIdx] = c + v;
+                    else
+                        contrib.VolByTick[tickIdx] = v;
+                }
+            }
+
+            if (contrib != null && contrib.VolByTick.Count > 0)
+                rollingQueue.Enqueue(contrib);
+        }
+
+        private void TrimRolling(DateTime nowBarTime)
+        {
+            if (rollingQueue.Count == 0 || WindowMinutes <= 0)
+                return;
+
+            while (rollingQueue.Count > 0)
+            {
+                var oldest = rollingQueue.Peek();
+                double ageMin = (nowBarTime - oldest.Time).TotalMinutes;
+
+                // Nota: el timestamp de barra es inicio; esto es una aproximación suficiente para Rolling.
+                if (ageMin <= WindowMinutes)
+                    break;
+
+                rollingQueue.Dequeue();
+
+                foreach (var kv in oldest.VolByTick)
+                {
+                    long tickIdx = kv.Key;
+                    long vol     = kv.Value;
+
+                    if (!profileVolByTick.TryGetValue(tickIdx, out long cur))
+                        continue;
+
+                    long newV = cur - vol;
+                    if (newV <= 0)
+                        profileVolByTick.Remove(tickIdx);
+                    else
+                        profileVolByTick[tickIdx] = newV;
+                }
+            }
+        }
+
+        // ---------------------------
+        // Nodes: calcular HVN/LVN
+        // ---------------------------
+        private void ComputeNodesAndDraw()
+        {
+            // Reset arrays
+            lastPOC = double.NaN;
+            for (int i = 0; i < MaxNodesLimit; i++)
+            {
+                lastHVN[i] = double.NaN;
+                lastLVN[i] = double.NaN;
+            }
+
+            if (profileVolByTick.Count == 0)
+            {
+                RemoveNodeDraws();
+                return;
+            }
+
+            // 1) Construir bins (agregados) desde el perfil tick-level
+            long minTick = profileVolByTick.Keys.Min();
+            long maxTick = profileVolByTick.Keys.Max();
+
+            int binTicks = ResolveBinTicks(minTick, maxTick);
+            if (binTicks < 1) binTicks = 1;
+
+            // agregamos tick->binStart
+            var volByBin = new Dictionary<long, long>(); // binStartTick -> vol
+
+            foreach (var kv in profileVolByTick)
+            {
+                long tickIdx = kv.Key;
+                long v       = kv.Value;
+                if (v <= 0) continue;
+
+                long binStart = (tickIdx / binTicks) * binTicks;
+
+                if (volByBin.TryGetValue(binStart, out long cur))
+                    volByBin[binStart] = cur + v;
+                else
+                    volByBin[binStart] = v;
+            }
+
+            if (volByBin.Count == 0)
+            {
+                RemoveNodeDraws();
+                return;
+            }
+
+            long minBin = (minTick / binTicks) * binTicks;
+            long maxBin = (maxTick / binTicks) * binTicks;
+
+            int nBins = (int)((maxBin - minBin) / binTicks) + 1;
+            if (nBins < 3)
+            {
+                RemoveNodeDraws();
+                return;
+            }
+
+            long[] binStartTicksArr = new long[nBins];
+            double[] vols = new double[nBins];
+
+            for (int i = 0; i < nBins; i++)
+            {
+                long b = minBin + (long)i * binTicks;
+                binStartTicksArr[i] = b;
+
+                if (volByBin.TryGetValue(b, out long v))
+                    vols[i] = v;
+                else
+                    vols[i] = 0;
+            }
+
+            // 2) POC
+            int pocIdx = 0;
+            double pocVol = vols[0];
+            for (int i = 1; i < nBins; i++)
+            {
+                if (vols[i] > pocVol)
+                {
+                    pocVol = vols[i];
+                    pocIdx = i;
+                }
+            }
+
+            if (pocVol <= 0)
+            {
+                RemoveNodeDraws();
+                return;
+            }
+
+            lastPOC = BinIndexToCenterPrice(binStartTicksArr[pocIdx], binTicks);
+
+            // 3) Suavizado para detectar picos/valles
+            double[] sm = Smooth(vols, SmoothBins);
+
+            // 4) Detectar picos (candidatos HVN)
+            var peakIdxs = new List<int>();
+            for (int i = 1; i < nBins - 1; i++)
+            {
+                if (sm[i] <= 0) continue;
+                if (sm[i] >= sm[i - 1] && sm[i] >= sm[i + 1])
+                    peakIdxs.Add(i);
+            }
+
+            // Filtro por % del POC (usa volumen real del bin, no el suavizado)
+            double hvnMin = HVNMinPctOfPOC * pocVol;
+            peakIdxs = peakIdxs.Where(i => vols[i] >= hvnMin).ToList();
+
+            // Ordenar por volumen descendente
+            peakIdxs.Sort((a, b) => vols[b].CompareTo(vols[a]));
+
+            var hvn = new List<Node>();
+            int maxH = Math.Max(1, Math.Min(MaxHVN, MaxNodesLimit));
+            int minDistTicks = Math.Max(0, MinNodeDistanceTicks);
+
+            foreach (int idx in peakIdxs)
+            {
+                if (hvn.Count >= maxH)
+                    break;
+
+                bool tooClose = false;
+                foreach (var n in hvn)
+                {
+                    int distTicks = Math.Abs(idx - n.Index) * binTicks;
+                    if (distTicks < minDistTicks)
+                    {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                if (tooClose)
+                    continue;
+
+                hvn.Add(new Node
+                {
+                    Index        = idx,
+                    BinStartTick = binStartTicksArr[idx],
+                    Price        = BinIndexToCenterPrice(binStartTicksArr[idx], binTicks),
+                    Volume       = vols[idx]
+                });
+            }
+
+            // Si no hay HVN suficiente, al menos usa el POC como HVN #1
+            if (hvn.Count == 0)
+            {
+                hvn.Add(new Node
+                {
+                    Index        = pocIdx,
+                    BinStartTick = binStartTicksArr[pocIdx],
+                    Price        = lastPOC,
+                    Volume       = pocVol
+                });
+            }
+
+            // 5) LVN: valles entre HVNs (modo típico)
+            var lvnCandidates = new List<Node>();
+            if (MaxLVN > 0 && hvn.Count >= 2)
+            {
+                var hvnByPrice = hvn.OrderBy(x => x.Index).ToList();
+
+                for (int i = 0; i < hvnByPrice.Count - 1; i++)
+                {
+                    int a = hvnByPrice[i].Index;
+                    int b = hvnByPrice[i + 1].Index;
+                    if (b - a < 2) continue;
+
+                    int best = -1;
+                    double bestV = double.MaxValue;
+                    for (int k = a + 1; k <= b - 1; k++)
+                    {
+                        if (sm[k] < bestV)
+                        {
+                            bestV = sm[k];
+                            best  = k;
+                        }
+                    }
+
+                    if (best >= 0)
+                    {
+                        double vReal = vols[best];
+                        if (vReal <= LVNMaxPctOfPOC * pocVol)
+                        {
+                            lvnCandidates.Add(new Node
+                            {
+                                Index        = best,
+                                BinStartTick = binStartTicksArr[best],
+                                Price        = BinIndexToCenterPrice(binStartTicksArr[best], binTicks),
+                                Volume       = vReal
+                            });
+                        }
+                    }
+                }
+            }
+            else if (MaxLVN > 0)
+            {
+                // Fallback: mínimos locales globales (si solo hay un HVN detectado)
+                for (int i = 1; i < nBins - 1; i++)
+                {
+                    if (sm[i] <= sm[i - 1] && sm[i] <= sm[i + 1] && vols[i] > 0)
+                    {
+                        if (vols[i] <= LVNMaxPctOfPOC * pocVol)
+                        {
+                            lvnCandidates.Add(new Node
+                            {
+                                Index        = i,
+                                BinStartTick = binStartTicksArr[i],
+                                Price        = BinIndexToCenterPrice(binStartTicksArr[i], binTicks),
+                                Volume       = vols[i]
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Dedup + ordenar LVN por volumen ascendente (más "vacío" primero)
+            lvnCandidates = lvnCandidates
+                .GroupBy(x => x.Index)
+                .Select(g => g.First())
+                .OrderBy(x => x.Volume)
+                .ToList();
+
+            var lvn = new List<Node>();
+            int maxL = Math.Max(0, Math.Min(MaxLVN, MaxNodesLimit));
+            foreach (var cand in lvnCandidates)
+            {
+                if (lvn.Count >= maxL)
+                    break;
+
+                bool tooClose = false;
+                foreach (var n in lvn)
+                {
+                    int distTicks = Math.Abs(cand.Index - n.Index) * binTicks;
+                    if (distTicks < minDistTicks)
+                    {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                if (tooClose) continue;
+
+                lvn.Add(cand);
+            }
+
+            // 6) Guardar resultados (para integración posterior)
+            for (int i = 0; i < hvn.Count && i < MaxNodesLimit; i++)
+                lastHVN[i] = hvn[i].Price;
+
+            for (int i = 0; i < lvn.Count && i < MaxNodesLimit; i++)
+                lastLVN[i] = lvn[i].Price;
+
+            // 7) Dibujar
+            DrawNodes(hvn, lvn);
+        }
+
+        private int ResolveBinTicks(long minTick, long maxTick)
+        {
+            if (!AutoBinFromMaxLevels)
+                return Math.Max(1, BinTicks);
+
+            int levels = Math.Max(5, MaxLevels);
+            long rangeTicks = Math.Max(1, (maxTick - minTick) + 1);
+            int bt = (int)Math.Ceiling(rangeTicks / (double)levels);
+            return Math.Max(1, bt);
+        }
+
+        private double[] Smooth(double[] data, int smooth)
+        {
+            if (data == null || data.Length == 0)
+                return new double[0];
+
+            int s = Math.Max(1, smooth);
+            if (s % 2 == 0) s++; // forzar impar
+            int k = s / 2;
+
+            double[] outp = new double[data.Length];
+            for (int i = 0; i < data.Length; i++)
+            {
+                double sum = 0.0;
+                int cnt = 0;
+                for (int j = i - k; j <= i + k; j++)
+                {
+                    if (j < 0 || j >= data.Length) continue;
+                    sum += data[j];
+                    cnt++;
+                }
+                outp[i] = (cnt > 0) ? (sum / cnt) : data[i];
+            }
+            return outp;
+        }
+
+        private long PriceToTickIndex(double price)
+        {
+            if (tickSize <= 0)
+                return 0;
+
+            return (long)Math.Round(price / tickSize, MidpointRounding.AwayFromZero);
+        }
+
+        private double BinIndexToCenterPrice(long binStartTick, int binTicks)
+        {
+            long center = binStartTick + (binTicks / 2);
+            double p = center * tickSize;
+            return Instrument.MasterInstrument.RoundToTickSize(p);
+        }
+
+        // ---------------------------
+        // Drawing
+        // ---------------------------
+        private void DrawNodes(List<Node> hvn, List<Node> lvn)
+        {
+            // POC
+            string pocTag = $"{instanceTag}_POC";
+            if (DrawPOC && !double.IsNaN(lastPOC))
+            {
+                var line = Draw.HorizontalLine(this, pocTag, lastPOC, POCBrush);
+                if (line != null && line.Stroke != null)
+                {
+                    line.Stroke.Width = LineWidth;
+                    line.Stroke.DashStyleHelper = DashStyleHelper.Solid;
+                }
+            }
+            else
+            {
+                RemoveDrawObjectSafe(pocTag);
+            }
+
+            // HVN
+            for (int i = 0; i < MaxNodesLimit; i++)
+            {
+                string tag = $"{instanceTag}_HVN_{i + 1}";
+                if (DrawHVN && i < hvn.Count && !double.IsNaN(hvn[i].Price))
+                {
+                    var line = Draw.HorizontalLine(this, tag, hvn[i].Price, HVNBrush);
+                    if (line != null && line.Stroke != null)
+                    {
+                        line.Stroke.Width = LineWidth;
+                        line.Stroke.DashStyleHelper = DashStyleHelper.Solid;
+                    }
+                }
+                else
+                {
+                    RemoveDrawObjectSafe(tag);
+                }
+            }
+
+            // LVN
+            for (int i = 0; i < MaxNodesLimit; i++)
+            {
+                string tag = $"{instanceTag}_LVN_{i + 1}";
+                if (DrawLVN && i < lvn.Count && !double.IsNaN(lvn[i].Price))
+                {
+                    var line = Draw.HorizontalLine(this, tag, lvn[i].Price, LVNBrush);
+                    if (line != null && line.Stroke != null)
+                    {
+                        line.Stroke.Width = LineWidth;
+                        line.Stroke.DashStyleHelper = LVNDash;
+                    }
+                }
+                else
+                {
+                    RemoveDrawObjectSafe(tag);
+                }
+            }
+        }
+
+        private void RemoveNodeDraws()
+        {
+            RemoveDrawObjectSafe($"{instanceTag}_POC");
+            for (int i = 0; i < MaxNodesLimit; i++)
+            {
+                RemoveDrawObjectSafe($"{instanceTag}_HVN_{i + 1}");
+                RemoveDrawObjectSafe($"{instanceTag}_LVN_{i + 1}");
+            }
+        }
+
+        private void RemoveDrawObjectSafe(string tag)
+        {
+            try { RemoveDrawObject(tag); } catch { }
+        }
+
+        // ---------------------------
+        // Week start helper (ETH Futures: domingo 18:00)
+        // ---------------------------
+        private DateTime GetFuturesWeekStart(DateTime barTime)
+        {
+            DateTime barDate = barTime.Date;
+            int daysSinceSunday = (int)barDate.DayOfWeek;
+            DateTime sundayDate = barDate.AddDays(-daysSinceSunday);
+            DateTime weekStart = sundayDate.AddHours(18);
+
+            if (barTime < weekStart)
+                weekStart = sundayDate.AddDays(-7).AddHours(18);
+
+            return weekStart;
+        }
+    }
+}
+
+#region NinjaScript generated code. Neither change nor remove.
+
+namespace NinjaTrader.NinjaScript.Indicators
+{
+    public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
+    {
+        private avp[] cacheavp;
+
+        public avp avp(NinjaTrader.NinjaScript.AvpProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
+        {
+            return avp(Input, mode, windowMinutes, volumetricTimeFrameMin, autoBinFromMaxLevels, maxLevels, binTicks, smoothBins, maxHVN, maxLVN, minNodeDistanceTicks, hVNMinPctOfPOC, lVNMaxPctOfPOC, drawPOC, drawHVN, drawLVN, pOCBrush, hVNBrush, lVNBrush, lineWidth, lVNDash);
+        }
+
+        public avp avp(ISeries<double> input, NinjaTrader.NinjaScript.AvpProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
+        {
+            if (cacheavp != null)
+                for (int idx = 0; idx < cacheavp.Length; idx++)
+                    if (cacheavp[idx] != null
+                        && cacheavp[idx].Mode == mode
+                        && cacheavp[idx].WindowMinutes == windowMinutes
+                        && cacheavp[idx].VolumetricTimeFrameMin == volumetricTimeFrameMin
+                        && cacheavp[idx].AutoBinFromMaxLevels == autoBinFromMaxLevels
+                        && cacheavp[idx].MaxLevels == maxLevels
+                        && cacheavp[idx].BinTicks == binTicks
+                        && cacheavp[idx].SmoothBins == smoothBins
+                        && cacheavp[idx].MaxHVN == maxHVN
+                        && cacheavp[idx].MaxLVN == maxLVN
+                        && cacheavp[idx].MinNodeDistanceTicks == minNodeDistanceTicks
+                        && cacheavp[idx].HVNMinPctOfPOC == hVNMinPctOfPOC
+                        && cacheavp[idx].LVNMaxPctOfPOC == lVNMaxPctOfPOC
+                        && cacheavp[idx].DrawPOC == drawPOC
+                        && cacheavp[idx].DrawHVN == drawHVN
+                        && cacheavp[idx].DrawLVN == drawLVN
+                        && cacheavp[idx].POCBrush == pOCBrush
+                        && cacheavp[idx].HVNBrush == hVNBrush
+                        && cacheavp[idx].LVNBrush == lVNBrush
+                        && cacheavp[idx].LineWidth == lineWidth
+                        && cacheavp[idx].LVNDash == lVNDash
+                        && cacheavp[idx].EqualsInput(input))
+                        return cacheavp[idx];
+
+            return CacheIndicator<avp>(new avp()
+            {
+                Mode = mode,
+                WindowMinutes = windowMinutes,
+                VolumetricTimeFrameMin = volumetricTimeFrameMin,
+                AutoBinFromMaxLevels = autoBinFromMaxLevels,
+                MaxLevels = maxLevels,
+                BinTicks = binTicks,
+                SmoothBins = smoothBins,
+                MaxHVN = maxHVN,
+                MaxLVN = maxLVN,
+                MinNodeDistanceTicks = minNodeDistanceTicks,
+                HVNMinPctOfPOC = hVNMinPctOfPOC,
+                LVNMaxPctOfPOC = lVNMaxPctOfPOC,
+                DrawPOC = drawPOC,
+                DrawHVN = drawHVN,
+                DrawLVN = drawLVN,
+                POCBrush = pOCBrush,
+                HVNBrush = hVNBrush,
+                LVNBrush = lVNBrush,
+                LineWidth = lineWidth,
+                LVNDash = lVNDash
+            }, input, ref cacheavp);
+        }
+    }
+}
+
+namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
+{
+    public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
+    {
+        public Indicators.avp avp(NinjaTrader.NinjaScript.AvpProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
+        {
+            return indicator.avp(Input, mode, windowMinutes, volumetricTimeFrameMin, autoBinFromMaxLevels, maxLevels, binTicks, smoothBins, maxHVN, maxLVN, minNodeDistanceTicks, hVNMinPctOfPOC, lVNMaxPctOfPOC, drawPOC, drawHVN, drawLVN, pOCBrush, hVNBrush, lVNBrush, lineWidth, lVNDash);
+        }
+
+        public Indicators.avp avp(ISeries<double> input, NinjaTrader.NinjaScript.AvpProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
+        {
+            return indicator.avp(input, mode, windowMinutes, volumetricTimeFrameMin, autoBinFromMaxLevels, maxLevels, binTicks, smoothBins, maxHVN, maxLVN, minNodeDistanceTicks, hVNMinPctOfPOC, lVNMaxPctOfPOC, drawPOC, drawHVN, drawLVN, pOCBrush, hVNBrush, lVNBrush, lineWidth, lVNDash);
+        }
+    }
+}
+
+namespace NinjaTrader.NinjaScript.Strategies
+{
+    public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
+    {
+        public Indicators.avp avp(NinjaTrader.NinjaScript.AvpProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
+        {
+            return indicator.avp(Input, mode, windowMinutes, volumetricTimeFrameMin, autoBinFromMaxLevels, maxLevels, binTicks, smoothBins, maxHVN, maxLVN, minNodeDistanceTicks, hVNMinPctOfPOC, lVNMaxPctOfPOC, drawPOC, drawHVN, drawLVN, pOCBrush, hVNBrush, lVNBrush, lineWidth, lVNDash);
+        }
+
+        public Indicators.avp avp(ISeries<double> input, NinjaTrader.NinjaScript.AvpProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
+        {
+            return indicator.avp(input, mode, windowMinutes, volumetricTimeFrameMin, autoBinFromMaxLevels, maxLevels, binTicks, smoothBins, maxHVN, maxLVN, minNodeDistanceTicks, hVNMinPctOfPOC, lVNMaxPctOfPOC, drawPOC, drawHVN, drawLVN, pOCBrush, hVNBrush, lVNBrush, lineWidth, lVNDash);
+        }
+    }
+}
+
+#endregion
+
