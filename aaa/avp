@@ -850,12 +850,12 @@ namespace NinjaTrader.NinjaScript.Indicators
     {
         private avp[] cacheavp;
 
-        public avp avp(ProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
+        public avp avp(global::NinjaTrader.NinjaScript.Indicators.ProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
         {
             return avp(Input, mode, windowMinutes, volumetricTimeFrameMin, autoBinFromMaxLevels, maxLevels, binTicks, smoothBins, maxHVN, maxLVN, minNodeDistanceTicks, hVNMinPctOfPOC, lVNMaxPctOfPOC, drawPOC, drawHVN, drawLVN, pOCBrush, hVNBrush, lVNBrush, lineWidth, lVNDash);
         }
 
-        public avp avp(ISeries<double> input, ProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
+        public avp avp(ISeries<double> input, global::NinjaTrader.NinjaScript.Indicators.ProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
         {
             if (cacheavp != null)
                 for (int idx = 0; idx < cacheavp.Length; idx++)
@@ -914,12 +914,12 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
     public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
     {
-        public Indicators.avp avp(Indicators.ProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
+        public Indicators.avp avp(global::NinjaTrader.NinjaScript.Indicators.ProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
         {
             return indicator.avp(Input, mode, windowMinutes, volumetricTimeFrameMin, autoBinFromMaxLevels, maxLevels, binTicks, smoothBins, maxHVN, maxLVN, minNodeDistanceTicks, hVNMinPctOfPOC, lVNMaxPctOfPOC, drawPOC, drawHVN, drawLVN, pOCBrush, hVNBrush, lVNBrush, lineWidth, lVNDash);
         }
 
-        public Indicators.avp avp(ISeries<double> input, Indicators.ProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
+        public Indicators.avp avp(ISeries<double> input, global::NinjaTrader.NinjaScript.Indicators.ProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
         {
             return indicator.avp(input, mode, windowMinutes, volumetricTimeFrameMin, autoBinFromMaxLevels, maxLevels, binTicks, smoothBins, maxHVN, maxLVN, minNodeDistanceTicks, hVNMinPctOfPOC, lVNMaxPctOfPOC, drawPOC, drawHVN, drawLVN, pOCBrush, hVNBrush, lVNBrush, lineWidth, lVNDash);
         }
@@ -930,12 +930,12 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
     public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
     {
-        public Indicators.avp avp(Indicators.ProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
+        public Indicators.avp avp(global::NinjaTrader.NinjaScript.Indicators.ProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
         {
             return indicator.avp(Input, mode, windowMinutes, volumetricTimeFrameMin, autoBinFromMaxLevels, maxLevels, binTicks, smoothBins, maxHVN, maxLVN, minNodeDistanceTicks, hVNMinPctOfPOC, lVNMaxPctOfPOC, drawPOC, drawHVN, drawLVN, pOCBrush, hVNBrush, lVNBrush, lineWidth, lVNDash);
         }
 
-        public Indicators.avp avp(ISeries<double> input, Indicators.ProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
+        public Indicators.avp avp(ISeries<double> input, global::NinjaTrader.NinjaScript.Indicators.ProfileMode mode, int windowMinutes, int volumetricTimeFrameMin, bool autoBinFromMaxLevels, int maxLevels, int binTicks, int smoothBins, int maxHVN, int maxLVN, int minNodeDistanceTicks, double hVNMinPctOfPOC, double lVNMaxPctOfPOC, bool drawPOC, bool drawHVN, bool drawLVN, Brush pOCBrush, Brush hVNBrush, Brush lVNBrush, int lineWidth, DashStyleHelper lVNDash)
         {
             return indicator.avp(input, mode, windowMinutes, volumetricTimeFrameMin, autoBinFromMaxLevels, maxLevels, binTicks, smoothBins, maxHVN, maxLVN, minNodeDistanceTicks, hVNMinPctOfPOC, lVNMaxPctOfPOC, drawPOC, drawHVN, drawLVN, pOCBrush, hVNBrush, lVNBrush, lineWidth, lVNDash);
         }
