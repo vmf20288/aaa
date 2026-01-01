@@ -235,7 +235,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 PaintPriceMarkers        = false;
                 IsSuspendedWhileInactive = false;
 
-                MinTrade         = 75;
+                MinTrade         = 50;
                 ToleranciaTicks  = 8;
                 ClusterWindowMs  = 300;
                 DriftTicks       = 2;
