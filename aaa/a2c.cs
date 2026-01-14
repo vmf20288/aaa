@@ -638,10 +638,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                 return;
 
             // Confirmaciones (igual que antes)
-            float rowHeight = 18f;
+            float rowHeight = 36f;
 
             // SOLO filas inferiores (VOL/Δ/CΔ) más altas
-            float lowerRowHeight = 24f;
+            float lowerRowHeight = 44f;
 
             float topMargin = 4f;
             float bottomMargin = 2f;
@@ -673,7 +673,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             using (var cumNegBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(200, 70, 70, 170)))
             using (var textFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 12f))
             // Texto VOL/Δ/CΔ más grande
-            using (var valueFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 16f))
+            using (var valueFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 26f))
             {
                 // Centrar valores en su celda (ancho = centro-a-centro)
                 valueFormat.TextAlignment = TextAlignment.Center;
