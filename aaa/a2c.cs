@@ -661,7 +661,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (rt == null)
                 return;
 
-            using (var bgBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(10, 10, 10, 200)))
+            using (var bgBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(0, 0, 0, 255)))
             using (var gridBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(200, 200, 200, 120)))
             // Línea divisoria debajo de Divergence: más gruesa + apenas más visible
             using (var dividerBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(220, 220, 220, 160)))
@@ -671,7 +671,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             using (var deltaNegBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(220, 80, 80, 190)))
             using (var cumPosBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(60, 180, 110, 170)))
             using (var cumNegBrush = new D2D1.SolidColorBrush(rt, new SharpDX.Color(200, 70, 70, 170)))
-            using (var textFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 12f))
+            using (var textFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 16f))
             // Texto VOL/Δ/CΔ más grande
             using (var valueFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 26f))
             {
@@ -739,7 +739,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 int startBar = Math.Max(ChartBars.FromIndex, 0);
                 int endBar = Math.Min(ChartBars.ToIndex, Bars.Count - 1);
 
-                float triangleSize = 5f;
+                float triangleSize = 8f;
                 float row1Middle = firstLineY + rowHeight * 0.5f;
                 float row2Middle = firstLineY + rowHeight * 1.5f;
                 float row4Middle = firstLineY + rowHeight * 3.5f;
