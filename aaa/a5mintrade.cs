@@ -167,15 +167,15 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Browsable(false), XmlIgnore] public Series<double> LastMinTradeVolume => volumeSeries;
         [Browsable(false), XmlIgnore] public Series<double> LastMinTradePrice  => priceSeries;
 
-        [Browsable(false)] public string       Version                    => InternalVersion;
-        [Browsable(false)] public MinTradeSide CurrentMinTradeSide        { get; private set; } = MinTradeSide.Unknown;
-        [Browsable(false)] public DateTime     CurrentMinTradeTime        { get; private set; } = DateTime.MinValue;
-        [Browsable(false)] public double       CurrentMinTradeVolumeValue { get; private set; } = double.NaN;
-        [Browsable(false)] public double       CurrentMinTradePriceValue  { get; private set; } = double.NaN;
-        [Browsable(false)] public double       LastDetectedMinTradeVolume { get; private set; } = double.NaN;
-        [Browsable(false)] public double       LastDetectedMinTradePrice  { get; private set; } = double.NaN;
-        [Browsable(false)] public MinTradeSide LastDetectedMinTradeSide   { get; private set; } = MinTradeSide.Unknown;
-        [Browsable(false)] public DateTime     LastDetectedMinTradeTime   { get; private set; } = DateTime.MinValue;
+        [Browsable(false), XmlIgnore] public string       Version                    => InternalVersion;
+        [Browsable(false), XmlIgnore] public MinTradeSide CurrentMinTradeSide        { get; private set; } = MinTradeSide.Unknown;
+        [Browsable(false), XmlIgnore] public DateTime     CurrentMinTradeTime        { get; private set; } = DateTime.MinValue;
+        [Browsable(false), XmlIgnore] public double       CurrentMinTradeVolumeValue { get; private set; } = double.NaN;
+        [Browsable(false), XmlIgnore] public double       CurrentMinTradePriceValue  { get; private set; } = double.NaN;
+        [Browsable(false), XmlIgnore] public double       LastDetectedMinTradeVolume { get; private set; } = double.NaN;
+        [Browsable(false), XmlIgnore] public double       LastDetectedMinTradePrice  { get; private set; } = double.NaN;
+        [Browsable(false), XmlIgnore] public MinTradeSide LastDetectedMinTradeSide   { get; private set; } = MinTradeSide.Unknown;
+        [Browsable(false), XmlIgnore] public DateTime     LastDetectedMinTradeTime   { get; private set; } = DateTime.MinValue;
 
         private void ResetForNewSession()
         {
