@@ -100,7 +100,12 @@ namespace NinjaTrader.NinjaScript.Indicators
 
                 divVolBarsType = BarsArray[divBip].BarsType as VolumetricBarsType;
             }
-            else if (State == State.Terminated)
+            else if (State == State.Historical)
+            {
+                // Poner este indicador por encima de TODO (incluye global draw objects)
+                SetZOrder(int.MaxValue);
+            }
+			else if (State == State.Terminated)
             {
                 ClearSessionState();
             }
