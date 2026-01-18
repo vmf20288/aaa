@@ -94,6 +94,20 @@ namespace NinjaTrader.NinjaScript.Indicators
         private Series<double> volumeSeries;
         private Series<double> priceSeries;
 
+        #region Output helpers (plots)
+        private void ClearLastOutputs()
+        {
+            if (volumeSeries != null) volumeSeries[0] = double.NaN;
+            if (priceSeries  != null) priceSeries[0]  = double.NaN;
+        }
+
+        private void SetLastOutputs(long vol, double price)
+        {
+            if (volumeSeries != null) volumeSeries[0] = vol;   // long -> double
+            if (priceSeries  != null) priceSeries[0]  = price;
+        }
+        #endregion
+
         // --- L1 para inferir lado por tick ---
         private double       bestBid       = double.NaN;
         private double       bestAsk       = double.NaN;
@@ -215,10 +229,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             LastDetectedMinTradeSide   = MinTradeSide.Unknown;
             LastDetectedMinTradeTime   = DateTime.MinValue;
 
-            if (volumeSeries != null)
-                volumeSeries[0] = double.NaN;
-            if (priceSeries != null)
-                priceSeries[0]  = double.NaN;
+            ClearLastOutputs();
         }
 
         #region OnStateChange
@@ -287,8 +298,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 if (ResetSession && Bars.IsFirstBarOfSession && IsFirstTickOfBar)
                     ResetForNewSession();
 
-                volumeSeries[0] = double.NaN;
-                priceSeries[0]  = double.NaN;
+                ClearLastOutputs();
                 return;
             }
 
@@ -361,8 +371,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 if (CurrentBars[0] < 0)
                     return;
 
-                double   price    = Close[0];
-                double   volume   = Volume[0];
+                double   price    = Closes[2][0];
+                double   volume   = Volumes[2][0];
                 DateTime tickTime = Times[2][0];
 
                 MinTradeSide side = ResolveSide(price);
@@ -495,8 +505,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             DrawEventText(target);
 
             // Refrescar salidas (opcional: reportamos el total acumulado del nivel)
-            volumeSeries[0] = target.Volume;
-            priceSeries[0]  = target.Price;
+            SetLastOutputs(target.Volume, target.Price);
 
             CurrentMinTradeVolumeValue = target.Volume;
             CurrentMinTradePriceValue  = target.Price;
@@ -548,8 +557,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             DrawEventText(lv);
 
             // Salidas públicas (último evento)
-            volumeSeries[0] = volume;
-            priceSeries[0]  = price;
+            SetLastOutputs(volume, price);
 
             CurrentMinTradeVolumeValue = volume;
             CurrentMinTradePriceValue  = price;
