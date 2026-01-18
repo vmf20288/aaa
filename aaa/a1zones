@@ -401,7 +401,6 @@ namespace NinjaTrader.NinjaScript.Indicators
                     bestIdx = idx;
 
             ZoneInfo winner = zones[bestIdx];
-            ZoneInfo? aoiCand = null;
 
             SortedSet<int> losing = new SortedSet<int>();
 
@@ -412,28 +411,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 ZoneInfo looser = zones[idx];
                 losing.Add(looser.DataSeries);
 
-                if (IsAoiCandidate(winner, looser))
-                {
-                    if (aoiCand == null || looser.DataSeries > aoiCand.DataSeries)
-                        aoiCand = looser;
-                }
-
                 RemoveZone(idx);
-            }
-
-            if (aoiCand != null)
-            {
-                var inheritedLine = new LLLineInfo(aoiCand.Time, aoiCand.IsSupply, aoiCand.AOI,
-                                                   aoiCand.DataSeries, true, winner.Time);
-                llLines.Add(inheritedLine);
-
-                if (GlobalDraw)
-                {
-                    DateTime et = GetSessionEndFor(winner.Time);
-                    DrawGlobalAoiLine(inheritedLine, et);
-                }
-
-                losing.Add(aoiCand.DataSeries);
             }
 
             if (losing.Count > 0)
@@ -472,22 +450,6 @@ namespace NinjaTrader.NinjaScript.Indicators
                 return aWidth < bWidth ? 1 : -1;
 
             return 0;
-        }
-
-        private bool IsAoiCandidate(ZoneInfo winner, ZoneInfo cand)
-        {
-            double diff;
-            if (winner.IsSupply)
-            {
-                if (cand.AOI >= winner.AOI) return false;
-                diff = winner.AOI - cand.AOI;
-            }
-            else
-            {
-                if (cand.AOI <= winner.AOI) return false;
-                diff = cand.AOI - winner.AOI;
-            }
-            return diff / TickSize >= 15;
         }
 
         private IEnumerable<string> SortTfs(IEnumerable<int> bips)
